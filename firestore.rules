@@ -32,8 +32,7 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          request.auth.token.email == "begolbahaa98@gmail.com" ||
-          request.auth.token.email == "01552698433@scouts.local");
+          (request.auth.token.email == "begolbahaa98@gmail.com" && request.auth.token.email_verified == true));
     }
 
     function isValidUser(data) {
@@ -63,20 +62,16 @@ service cloud.firestore {
     }
     
     match /users/{userId} {
-      // Scouts can read their own profile, admins can read all
       allow read: if isOwner(userId) || isAdmin();
       
-      // Create: user can create their own profile as 'scout' during signup, or admin can create any
       allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
         (isOwner(userId) && request.resource.data.role == 'scout') || 
         isAdmin()
       );
       
-      // Update: user can update their own profile but NOT their role or progress (unless admin)
-      allow update: if isAuthenticated() && (
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
         isAdmin() || (
           isOwner(userId) && 
-          isValidUser(request.resource.data) &&
           request.resource.data.role == resource.data.role &&
           request.resource.data.badges.badge1.progress == resource.data.badges.badge1.progress &&
           request.resource.data.badges.badge2.progress == resource.data.badges.badge2.progress &&

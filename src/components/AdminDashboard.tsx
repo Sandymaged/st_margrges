@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { ScoutProfile, STAGES, BADGE_OPTIONS, BadgeSettings, Stage } from '../types';
 import { 
   Search, 
@@ -42,14 +42,39 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [sortField, setSortField] = useState<'name' | 'createdAt'>('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [editingScout, setEditingScout] = useState<ScoutProfile | null>(null);
+  const [editForm, setEditForm] = useState<{
+    name: string;
+    number: string;
+    stage: Stage;
+  } | null>(null);
+  const [deletingScout, setDeletingScout] = useState<ScoutProfile | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [newBadgeInputs, setNewBadgeInputs] = useState<Record<Stage, string>>({
     'أشبال وزهرات': '',
     'كشاف ومرشدات': '',
     'متقدم ورائدات': ''
   });
 
-  const isSuperAdmin = currentProfile?.number === '01552698433';
+  const isSuperAdmin = currentProfile?.number === '01552698433' || currentProfile?.email === 'begolbahaa98@gmail.com';
+
+  useEffect(() => {
+    if (message) {
+      const timer = setTimeout(() => setMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [message]);
+
+  const handleFirestoreError = (error: any, operation: string, path: string) => {
+    console.error(`Firestore Error (${operation}) at ${path}:`, error);
+    const errorMsg = error?.message || String(error);
+    if (errorMsg.includes('permission-denied')) {
+      setMessage({ type: 'error', text: 'ليس لديك صلاحية للقيام بهذا الإجراء' });
+    } else {
+      setMessage({ type: 'error', text: `حدث خطأ: ${errorMsg}` });
+    }
+  };
 
   useEffect(() => {
     const q = query(collection(db, 'users'));
@@ -117,19 +142,25 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
       });
   }, [scouts, searchTerm, stageFilter, badgeFilter, sortField, sortOrder]);
 
-  const handleUpdateProgress = async (e: React.FormEvent) => {
+  const handleUpdateScout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingScout) return;
+    if (!editingScout || !editForm) return;
 
     setEditLoading(true);
     try {
-      await updateDoc(doc(db, 'users', editingScout.uid), {
+      const updates: any = {
+        name: editForm.name,
+        number: editForm.number,
+        stage: editForm.stage,
         badges: editingScout.badges
-      });
+      };
+
+      await updateDoc(doc(db, 'users', editingScout.uid), updates);
+      setMessage({ type: 'success', text: 'تم تحديث البيانات بنجاح' });
       setEditingScout(null);
+      setEditForm(null);
     } catch (error) {
-      console.error('Update error:', error);
-      alert('حدث خطأ أثناء التحديث');
+      handleFirestoreError(error, 'update', `users/${editingScout.uid}`);
     } finally {
       setEditLoading(false);
     }
@@ -210,6 +241,21 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     } catch (error) {
       console.error('Error updating role:', error);
       alert('حدث خطأ أثناء تغيير الصلاحيات');
+    }
+  };
+
+  const handleDeleteScout = async () => {
+    if (!deletingScout) return;
+    
+    setDeleteLoading(true);
+    try {
+      await deleteDoc(doc(db, 'users', deletingScout.uid));
+      setMessage({ type: 'success', text: 'تم حذف الحساب بنجاح' });
+      setDeletingScout(null);
+    } catch (error) {
+      handleFirestoreError(error, 'delete', `users/${deletingScout.uid}`);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -481,11 +527,25 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => setEditingScout(scout)}
+                            onClick={() => {
+                              setEditingScout(scout);
+                              setEditForm({
+                                name: scout.name,
+                                number: scout.number,
+                                stage: scout.stage
+                              });
+                            }}
                             className="p-2 text-[#4285F4] hover:bg-[#4285F4]/10 rounded-xl transition-all"
-                            title="تعديل التقدم"
+                            title="تعديل البيانات"
                           >
                             <Edit2 size={18} />
+                          </button>
+                          <button
+                            onClick={() => setDeletingScout(scout)}
+                            className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                            title="حذف الحساب"
+                          >
+                            <Trash2 size={18} />
                           </button>
                           {isSuperAdmin && scout.uid !== currentProfile?.uid && (
                             <button
@@ -516,6 +576,78 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
         </>
       )}
 
+      {/* Messages */}
+      <AnimatePresence>
+        {message && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-2xl shadow-xl flex items-center gap-3 ${
+              message.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+            }`}
+          >
+            {message.type === 'success' ? <CheckCircle2 size={20} /> : <ShieldAlert size={20} />}
+            <span className="font-bold">{message.text}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deletingScout && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !deleteLoading && setDeletingScout(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <Trash2 size={32} />
+                </div>
+                <h3 className="text-2xl font-bold text-center text-gray-900 mb-2">حذف الحساب</h3>
+                <p className="text-center text-gray-500 mb-8">
+                  هل أنت متأكد من حذف حساب <span className="font-bold text-gray-900">"{deletingScout.name}"</span>؟ 
+                  هذا الإجراء لا يمكن التراجع عنه.
+                </p>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setDeletingScout(null)}
+                    disabled={deleteLoading}
+                    className="flex-1 py-4 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all disabled:opacity-50"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    onClick={handleDeleteScout}
+                    disabled={deleteLoading}
+                    className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-bold hover:bg-red-600 transition-all shadow-lg shadow-red-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {deleteLoading ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Trash2 size={18} />
+                        <span>حذف</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Edit Modal */}
       <AnimatePresence>
         {editingScout && (
@@ -536,9 +668,61 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                 </button>
               </div>
 
-              <form onSubmit={handleUpdateProgress} className="p-8 space-y-8 overflow-y-auto">
-                {(['badge1', 'badge2', 'badge3'] as const).map((key) => (
-                  <div key={key} className="space-y-4 p-6 bg-gray-50 rounded-3xl border border-gray-100">
+              <form onSubmit={handleUpdateScout} className="p-8 space-y-8 overflow-y-auto">
+                {/* Basic Info Section */}
+                <div className="space-y-6 p-6 bg-blue-50/50 rounded-3xl border border-blue-100">
+                  <h4 className="text-lg font-black text-blue-800 flex items-center gap-3">
+                    <Users size={22} />
+                    البيانات الأساسية
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-gray-500 mr-2">الاسم بالكامل:</label>
+                      <input
+                        type="text"
+                        required
+                        value={editForm?.name || ''}
+                        onChange={(e) => setEditForm(prev => prev ? { ...prev, name: e.target.value } : null)}
+                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-bold"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-gray-500 mr-2">رقم الهاتف:</label>
+                      <input
+                        type="text"
+                        required
+                        value={editForm?.number || ''}
+                        onChange={(e) => setEditForm(prev => prev ? { ...prev, number: e.target.value } : null)}
+                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-bold"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-gray-500 mr-2">المرحلة الكشفية:</label>
+                    <select
+                      value={editForm?.stage || ''}
+                      onChange={(e) => setEditForm(prev => prev ? { ...prev, stage: e.target.value as Stage } : null)}
+                      className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-bold bg-white"
+                    >
+                      {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-start gap-3">
+                    <ShieldAlert className="text-amber-500 shrink-0 mt-0.5" size={18} />
+                    <div className="text-xs text-amber-800 font-bold leading-relaxed">
+                      لتغيير كلمة المرور لهذا المستخدم، يرجى التواصل مع المسؤول التقني أو حذف الحساب وإعادة إنشائه بكلمة مرور جديدة، حيث لا يمكن تغيير كلمة مرور مستخدم آخر مباشرة لأسباب أمنية.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <h4 className="text-lg font-black text-gray-800 flex items-center gap-3 px-2">
+                    <Award size={22} className="text-[#4285F4]" />
+                    تقدم الشارات
+                  </h4>
+                  {(['badge1', 'badge2', 'badge3'] as const).map((key) => (
+                    <div key={key} className="space-y-4 p-6 bg-gray-50 rounded-3xl border border-gray-100">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="text-lg font-black text-gray-800 flex items-center gap-3">
                         <Award size={22} className="text-[#4285F4]" />
@@ -578,6 +762,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                     </div>
                   </div>
                 ))}
+                </div>
 
                 <button
                   disabled={editLoading}

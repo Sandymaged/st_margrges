@@ -4,7 +4,7 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword 
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { STAGES, BADGE_OPTIONS, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage } from '../types';
 import { 
   LogIn, 
@@ -90,6 +90,13 @@ export default function Auth() {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, fakeEmail, password);
       } else {
+        // Check if phone number already exists in Firestore
+        const q = query(collection(db, 'users'), where('number', '==', phone));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          throw new Error('هذا الرقم مسجل بالفعل في قاعدة البيانات');
+        }
+
         const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
         const user = userCredential.user;
 
@@ -255,20 +262,36 @@ export default function Auth() {
             )}
           </div>
 
-          <button
-            disabled={loading || (!isLogin && (!currentStageBadges.badge1?.length || !currentStageBadges.badge2?.length || !currentStageBadges.badge3?.length))}
-            type="submit"
-            className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
-          >
-            {loading ? (
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/50 border-t-white" />
-            ) : (
-              <>
-                {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
-                <span>{isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
-              </>
+          <div className="space-y-4">
+            <button
+              disabled={loading || (!isLogin && (!currentStageBadges.badge1?.length || !currentStageBadges.badge2?.length || !currentStageBadges.badge3?.length))}
+              type="submit"
+              className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
+            >
+              {loading ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/50 border-t-white" />
+              ) : (
+                <>
+                  {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
+                  <span>{isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
+                </>
+              )}
+            </button>
+
+            {isLogin && (
+              <button
+                type="button"
+                onClick={() => {
+                  const adminNumber = '01552698433';
+                  const message = `أهلاً، أنا عضو في الكشافة ونسيت كلمة المرور الخاصة بي. رقم هاتفي هو: ${phone}`;
+                  window.open(`https://wa.me/2${adminNumber}?text=${encodeURIComponent(message)}`, '_blank');
+                }}
+                className="w-full py-2 text-gray-500 font-bold hover:text-[#4285F4] transition-all text-sm"
+              >
+                نسيت كلمة المرور؟ تواصل مع المسؤول
+              </button>
             )}
-          </button>
+          </div>
         </form>
 
         <div className="mt-8 text-center">
