@@ -19,6 +19,7 @@ export interface ScoutProfile {
   };
   role: 'scout' | 'admin';
   createdAt: any;
+  joinDate: any;
 }
 
 export const STAGES: Stage[] = [

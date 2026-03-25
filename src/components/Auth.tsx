@@ -107,6 +107,7 @@ export default function Auth() {
           },
           role: 'scout',
           createdAt: serverTimestamp(),
+          joinDate: serverTimestamp(),
         };
 
         await setDoc(doc(db, 'users', user.uid), profile);
@@ -133,11 +134,16 @@ export default function Auth() {
     <div className="flex flex-col items-center justify-center min-h-[80vh] py-12">
       <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-2xl w-full border border-gray-100">
         <div className="text-center mb-8">
-          <img 
-            src="/logo.png" 
-            alt="Scouts Logo" 
-            className="h-20 w-20 mx-auto mb-4 object-contain"
-          />
+          <div className="h-20 w-20 mx-auto mb-4 bg-white rounded-full p-2 shadow-inner flex items-center justify-center overflow-hidden border border-gray-100">
+            <img 
+              src="/logo.png" 
+              alt="Scouts Logo" 
+              className="h-full w-full object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = 'https://api.dicebear.com/7.x/initials/svg?seed=MG&backgroundColor=ffffff&transitionDuration=0';
+              }}
+            />
+          </div>
           <h2 className="text-3xl font-black text-gray-800">
             {isLogin ? 'تسجيل الدخول' : 'إنشاء حساب كشاف'}
           </h2>

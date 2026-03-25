@@ -18,7 +18,8 @@ import {
   Settings,
   Plus,
   Trash2,
-  ShieldAlert
+  ShieldAlert,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -136,7 +137,9 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
         if (sortField === 'name') {
           comparison = a.name.localeCompare(b.name);
         } else {
-          comparison = (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0);
+          const dateA = a.joinDate || a.createdAt;
+          const dateB = b.joinDate || b.createdAt;
+          comparison = (dateA?.seconds || 0) - (dateB?.seconds || 0);
         }
         return sortOrder === 'asc' ? comparison : -comparison;
       });
@@ -487,6 +490,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                     <th className="px-6 py-4 font-black text-gray-600">رقم الهاتف</th>
                     <th className="px-6 py-4 font-black text-gray-600">المرحلة</th>
                     <th className="px-6 py-4 font-black text-gray-600">الشارات والتقدم</th>
+                    <th className="px-6 py-4 font-black text-gray-600 text-center">تاريخ الانضمام</th>
                     <th className="px-6 py-4 font-black text-gray-600">إجراءات</th>
                   </tr>
                 </thead>
@@ -522,6 +526,16 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                               <span className="text-[10px] font-bold text-[#4285F4]">{b.progress}%</span>
                             </div>
                           ))}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="text-xs font-bold text-gray-600">
+                          {(() => {
+                            const timestamp = scout.joinDate || scout.createdAt;
+                            if (!timestamp) return 'غير متوفر';
+                            const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+                            return date.toLocaleDateString('ar-EG');
+                          })()}
                         </div>
                       </td>
                       <td className="px-6 py-4">

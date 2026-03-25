@@ -1,13 +1,23 @@
 import React from 'react';
 import { ScoutProfile } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
-import { User as UserIcon, MapPin, Hash, LayoutGrid } from 'lucide-react';
+import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar } from 'lucide-react';
 
 interface ScoutProfileViewProps {
   profile: ScoutProfile;
 }
 
 export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return 'غير متوفر';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString('ar-EG', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
   return (
     <div className="space-y-8">
       {/* Profile Header Card */}
@@ -31,6 +41,12 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 <Hash size={18} className="text-[#4285F4]" />
                 <span className="text-gray-600 font-medium">الرقم:</span>
                 <span className="text-gray-800 font-bold">{profile.number}</span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
+                <Calendar size={18} className="text-[#4285F4]" />
+                <span className="text-gray-600 font-medium">تاريخ الانضمام:</span>
+                <span className="text-gray-800 font-bold">{formatDate(profile.joinDate || profile.createdAt)}</span>
               </div>
             </div>
           </div>
