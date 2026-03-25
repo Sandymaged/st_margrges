@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Scout profile data including badges and progress.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "stage": { "type": "string", "enum": ["أشبال وزهرات", "فتيان وفتيات", "كشاف متقدم", "جوالة"] },
+        "number": { "type": "string" },
+        "badges": {
+          "type": "object",
+          "properties": {
+            "badge1": { "$ref": "BadgeProgress" },
+            "badge2": { "$ref": "BadgeProgress" },
+            "badge3": { "$ref": "BadgeProgress" }
+          }
+        },
+        "role": { "type": "string", "enum": ["scout", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "stage", "number", "role"]
+    },
+    "BadgeProgress": {
+      "title": "Badge Progress",
+      "description": "Progress and notes for a specific badge.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "progress": { "type": "number" },
+        "notes": { "type": "string" }
+      },
+      "required": ["name", "progress"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of scout and admin profiles."
+    }
+  }
+}

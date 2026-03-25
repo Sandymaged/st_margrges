@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: userId (uid)
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required, < 100 chars)
+    //   - stage: string (required, enum)
+    //   - number: string (required, < 50 chars)
+    //   - badges: map (required)
+    //     - badge1, badge2, badge3: map
+    //       - name: string (required)
+    //       - progress: number (required, 0-100)
+    //       - notes: string (optional, < 1000 chars)
+    //   - role: string (required, 'scout' | 'admin')
+    //   - createdAt: timestamp (required)
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          request.auth.token.email == "begolbahaa98@gmail.com" ||
+          request.auth.token.email == "01552698433@scouts.local");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'stage', 'number', 'badges', 'role', 'createdAt']) &&
+        data.uid is string &&
+        data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+        data.email is string &&
+        data.stage in ['أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات'] &&
+        data.number is string && data.number.size() < 50 &&
+        data.role in ['scout', 'admin'] &&
+        data.badges is map &&
+        isValidBadge(data.badges.badge1) &&
+        isValidBadge(data.badges.badge2) &&
+        isValidBadge(data.badges.badge3);
+    }
+
+    function isValidBadge(badge) {
+      return badge is map &&
+        badge.name is string &&
+        badge.progress is number && badge.progress >= 0 && badge.progress <= 100 &&
+        (!('notes' in badge) || (badge.notes is string && badge.notes.size() < 1000));
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /users/{userId} {
+      // Scouts can read their own profile, admins can read all
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Create: user can create their own profile as 'scout' during signup, or admin can create any
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
+        (isOwner(userId) && request.resource.data.role == 'scout') || 
+        isAdmin()
+      );
+      
+      // Update: user can update their own profile but NOT their role or progress (unless admin)
+      allow update: if isAuthenticated() && (
+        isAdmin() || (
+          isOwner(userId) && 
+          isValidUser(request.resource.data) &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.badges.badge1.progress == resource.data.badges.badge1.progress &&
+          request.resource.data.badges.badge2.progress == resource.data.badges.badge2.progress &&
+          request.resource.data.badges.badge3.progress == resource.data.badges.badge3.progress
+        )
+      );
+      
+      allow delete: if isAdmin();
+    }
+  }
+}
