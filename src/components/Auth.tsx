@@ -90,13 +90,6 @@ export default function Auth() {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, fakeEmail, password);
       } else {
-        // Check if phone number already exists in Firestore
-        const q = query(collection(db, 'users'), where('number', '==', phone));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          throw new Error('هذا الرقم مسجل بالفعل في قاعدة البيانات');
-        }
-
         const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
         const user = userCredential.user;
 
