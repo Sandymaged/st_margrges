@@ -4,6 +4,7 @@ export interface BadgeProgress {
   name: string;
   progress: number; // 0 to 100
   notes: string;
+  completedRequirements?: string[];
 }
 
 export interface ScoutProfile {
@@ -33,6 +34,8 @@ export type BadgeSettings = Record<string, {
   badge2: string[];
   badge3: string[];
 }>;
+
+export type BadgeRequirements = Record<string, string[]>;
 
 export const BADGE_OPTIONS = [
   'المسعف',

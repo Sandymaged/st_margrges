@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { ScoutProfile, STAGES, BADGE_OPTIONS, BadgeSettings, Stage } from '../types';
+import { ScoutProfile, STAGES, BADGE_OPTIONS, BadgeSettings, Stage, BadgeRequirements } from '../types';
 import { 
   Search, 
   Filter, 
@@ -36,6 +36,10 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     'كشاف ومرشدات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] },
     'متقدم ورائدات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] }
   });
+  const [badgeRequirements, setBadgeRequirements] = useState<BadgeRequirements>({});
+  const [settingsTab, setSettingsTab] = useState<'stages' | 'requirements'>('stages');
+  const [selectedBadgeForReq, setSelectedBadgeForReq] = useState<string>('');
+  const [newRequirementInput, setNewRequirementInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState<string>('');
@@ -114,9 +118,18 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
       }
     });
 
+    const unsubscribeRequirements = onSnapshot(doc(db, 'settings', 'badgeRequirements'), (docSnap) => {
+      if (docSnap.exists()) {
+        setBadgeRequirements(docSnap.data() as BadgeRequirements);
+      } else {
+        setBadgeRequirements({});
+      }
+    });
+
     return () => {
       unsubscribeUsers();
       unsubscribeSettings();
+      unsubscribeRequirements();
     };
   }, [isSuperAdmin]);
 
@@ -169,17 +182,19 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     }
   };
 
-  const updateBadgeValue = (badgeKey: 'badge1' | 'badge2' | 'badge3', field: 'progress' | 'notes', value: any) => {
-    if (!editingScout) return;
-    setEditingScout({
-      ...editingScout,
-      badges: {
-        ...editingScout.badges,
-        [badgeKey]: {
-          ...editingScout.badges[badgeKey],
-          [field]: value
+  const updateBadgeValue = (badgeKey: 'badge1' | 'badge2' | 'badge3', field: 'progress' | 'notes' | 'completedRequirements', value: any) => {
+    setEditingScout(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        badges: {
+          ...prev.badges,
+          [badgeKey]: {
+            ...prev.badges[badgeKey],
+            [field]: value
+          }
         }
-      }
+      };
     });
   };
 
@@ -228,6 +243,46 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     } catch (error) {
       console.error('Error removing badge:', error);
       alert('حدث خطأ أثناء حذف الشارة');
+    }
+  };
+
+  const handleAddRequirement = async () => {
+    if (!selectedBadgeForReq || !newRequirementInput.trim()) return;
+    
+    const currentReqs = badgeRequirements[selectedBadgeForReq] || [];
+    if (currentReqs.includes(newRequirementInput.trim())) {
+      alert('هذا البند موجود بالفعل');
+      return;
+    }
+
+    const newSettings = {
+      ...badgeRequirements,
+      [selectedBadgeForReq]: [...currentReqs, newRequirementInput.trim()]
+    };
+
+    try {
+      await setDoc(doc(db, 'settings', 'badgeRequirements'), newSettings);
+      setNewRequirementInput('');
+    } catch (error) {
+      console.error('Error adding requirement:', error);
+      alert('حدث خطأ أثناء حفظ البند');
+    }
+  };
+
+  const handleRemoveRequirement = async (badge: string, reqToRemove: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف هذا البند؟`)) return;
+    
+    const currentReqs = badgeRequirements[badge] || [];
+    const newSettings = {
+      ...badgeRequirements,
+      [badge]: currentReqs.filter(r => r !== reqToRemove)
+    };
+
+    try {
+      await setDoc(doc(db, 'settings', 'badgeRequirements'), newSettings);
+    } catch (error) {
+      console.error('Error removing requirement:', error);
+      alert('حدث خطأ أثناء حذف البند');
     }
   };
 
@@ -300,74 +355,176 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
 
       {activeTab === 'settings' ? (
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-black text-gray-800 mb-2">إعدادات الشارات حسب المرحلة</h2>
-              <p className="text-gray-500">قم بإضافة أو حذف الشارات المتاحة لكل مرحلة كشفية.</p>
-            </div>
-            <div className="flex bg-gray-100 p-1 rounded-2xl">
-              {(['badge1', 'badge2', 'badge3'] as const).map(b => (
-                <button
-                  key={b}
-                  onClick={() => setActiveBadgeTab(b)}
-                  className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeBadgeTab === b ? 'bg-white text-[#4285F4] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  {b === 'badge1' ? 'شارة 1' : b === 'badge2' ? 'شارة 2' : 'شارة 3'}
-                </button>
-              ))}
-            </div>
+          <div className="flex gap-4 border-b border-gray-100 pb-4">
+            <button
+              onClick={() => setSettingsTab('stages')}
+              className={`px-6 py-2 rounded-xl font-bold transition-all ${settingsTab === 'stages' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              توزيع الشارات
+            </button>
+            <button
+              onClick={() => setSettingsTab('requirements')}
+              className={`px-6 py-2 rounded-xl font-bold transition-all ${settingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              بنود الشارات
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {STAGES.map((stage) => {
-              const stageSettings = badgeSettings[stage] || { badge1: [], badge2: [], badge3: [] };
-              const currentBadges = stageSettings[activeBadgeTab] || [];
-              
-              return (
-                <div key={stage} className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col h-full">
-                  <h3 className="text-xl font-black text-[#4285F4] mb-4 pb-4 border-b border-gray-200">
-                    {stage}
-                  </h3>
+          {settingsTab === 'stages' ? (
+            <>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-800 mb-2">إعدادات الشارات حسب المرحلة</h2>
+                  <p className="text-gray-500">قم بإضافة أو حذف الشارات المتاحة لكل مرحلة كشفية.</p>
+                </div>
+                <div className="flex bg-gray-100 p-1 rounded-2xl">
+                  {(['badge1', 'badge2', 'badge3'] as const).map(b => (
+                    <button
+                      key={b}
+                      onClick={() => setActiveBadgeTab(b)}
+                      className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeBadgeTab === b ? 'bg-white text-[#4285F4] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {b === 'badge1' ? 'شارة 1' : b === 'badge2' ? 'شارة 2' : 'شارة 3'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {STAGES.map((stage) => {
+                  const stageSettings = badgeSettings[stage] || { badge1: [], badge2: [], badge3: [] };
+                  const currentBadges = stageSettings[activeBadgeTab] || [];
                   
-                  <div className="flex-1 space-y-3 mb-6">
-                    {currentBadges.map((badge) => (
-                      <div key={badge} className="flex items-center justify-between bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
-                        <span className="font-bold text-gray-700">{badge}</span>
-                        <button 
-                          onClick={() => handleRemoveBadge(stage, badge)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="حذف الشارة"
+                  return (
+                    <div key={stage} className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col h-full">
+                      <h3 className="text-xl font-black text-[#4285F4] mb-4 pb-4 border-b border-gray-200">
+                        {stage}
+                      </h3>
+                      
+                      <div className="flex-1 space-y-3 mb-6">
+                        {currentBadges.map((badge) => (
+                          <div key={badge} className="flex items-center justify-between bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                            <span className="font-bold text-gray-700">{badge}</span>
+                            <button 
+                              onClick={() => handleRemoveBadge(stage, badge)}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="حذف الشارة"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        ))}
+                        {currentBadges.length === 0 && (
+                          <p className="text-sm text-gray-400 text-center py-4">لا توجد شارات مضافة</p>
+                        )}
+                      </div>
+
+                      <div className="mt-auto flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="اسم الشارة الجديدة..."
+                          value={newBadgeInputs[stage]}
+                          onChange={(e) => setNewBadgeInputs({...newBadgeInputs, [stage]: e.target.value})}
+                          onKeyPress={(e) => e.key === 'Enter' && handleAddBadge(stage)}
+                          className="flex-1 px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm"
+                        />
+                        <button
+                          onClick={() => handleAddBadge(stage)}
+                          disabled={!newBadgeInputs[stage].trim()}
+                          className="p-2 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors"
                         >
-                          <Trash2 size={18} />
+                          <Plus size={20} />
                         </button>
                       </div>
-                    ))}
-                    {currentBadges.length === 0 && (
-                      <p className="text-sm text-gray-400 text-center py-4">لا توجد شارات مضافة</p>
-                    )}
-                  </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 mb-2">بنود ومتطلبات الشارات</h2>
+                <p className="text-gray-500">قم بتحديد البنود المطلوبة لاجتياز كل شارة.</p>
+              </div>
 
-                  <div className="mt-auto flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="اسم الشارة الجديدة..."
-                      value={newBadgeInputs[stage]}
-                      onChange={(e) => setNewBadgeInputs({...newBadgeInputs, [stage]: e.target.value})}
-                      onKeyPress={(e) => e.key === 'Enter' && handleAddBadge(stage)}
-                      className="flex-1 px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm"
-                    />
-                    <button
-                      onClick={() => handleAddBadge(stage)}
-                      disabled={!newBadgeInputs[stage].trim()}
-                      className="p-2 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors"
-                    >
-                      <Plus size={20} />
-                    </button>
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="md:col-span-1 space-y-4">
+                  <label className="text-sm font-bold text-gray-700">اختر الشارة:</label>
+                  <select
+                    value={selectedBadgeForReq}
+                    onChange={(e) => setSelectedBadgeForReq(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none bg-white font-bold text-gray-700"
+                  >
+                    <option value="">-- اختر شارة --</option>
+                    {Array.from(new Set(Object.values(badgeSettings).flatMap((s: any) => [...(s.badge1 || []), ...(s.badge2 || []), ...(s.badge3 || [])]))).map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
                 </div>
-              );
-            })}
-          </div>
+
+                <div className="md:col-span-2">
+                  {selectedBadgeForReq ? (
+                    <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200">
+                      <h3 className="text-xl font-black text-[#4285F4] mb-4 pb-4 border-b border-gray-200">
+                        بنود شارة: {selectedBadgeForReq}
+                      </h3>
+
+                      <div className="space-y-3 mb-6">
+                        {(badgeRequirements[selectedBadgeForReq] || []).map((req, idx) => (
+                          <div key={idx} className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                            <div className="flex items-center gap-3">
+                              <div className="w-6 h-6 rounded-full bg-blue-100 text-[#4285F4] flex items-center justify-center text-xs font-bold shrink-0">
+                                {idx + 1}
+                              </div>
+                              <span className="font-bold text-gray-700">{req}</span>
+                            </div>
+                            <button 
+                              onClick={() => handleRemoveRequirement(selectedBadgeForReq, req)}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                              title="حذف البند"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        ))}
+                        {(badgeRequirements[selectedBadgeForReq] || []).length === 0 && (
+                          <p className="text-sm text-gray-400 text-center py-8 bg-white rounded-xl border border-dashed border-gray-200">
+                            لا توجد بنود لهذه الشارة حتى الآن
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="أضف بنداً جديداً..."
+                          value={newRequirementInput}
+                          onChange={(e) => setNewRequirementInput(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && handleAddRequirement()}
+                          className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                        />
+                        <button
+                          onClick={handleAddRequirement}
+                          disabled={!newRequirementInput.trim()}
+                          className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
+                        >
+                          <Plus size={20} />
+                          إضافة
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center p-12 bg-gray-50 rounded-3xl border border-dashed border-gray-200">
+                      <p className="text-gray-400 font-bold text-center">
+                        يرجى اختيار شارة من القائمة لعرض وتعديل بنودها
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -398,7 +555,13 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
               <div>
                 <p className="text-sm font-bold text-gray-500">شارات قيد التقدم</p>
                 <h3 className="text-2xl font-black text-gray-800">
-                  {scouts.reduce((acc, s) => acc + [s.badges.badge1, s.badges.badge2, s.badges.badge3].filter(b => b.progress > 0 && b.progress < 100).length, 0)}
+                  {scouts.reduce((acc, s) => acc + [s.badges.badge1, s.badges.badge2, s.badges.badge3].filter(b => {
+                    const reqs = badgeRequirements[b.name] || [];
+                    const hasReqs = reqs.length > 0;
+                    const completedReqs = (b.completedRequirements || []).filter(r => reqs.includes(r));
+                    const progress = hasReqs ? Math.round((completedReqs.length / reqs.length) * 100) : b.progress;
+                    return progress > 0 && progress < 100;
+                  }).length, 0)}
                 </h3>
               </div>
             </div>
@@ -517,15 +680,21 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col gap-2 min-w-[200px]">
-                          {[scout.badges.badge1, scout.badges.badge2, scout.badges.badge3].map((b, i) => (
+                          {[scout.badges.badge1, scout.badges.badge2, scout.badges.badge3].map((b, i) => {
+                            const reqs = badgeRequirements[b.name] || [];
+                            const hasReqs = reqs.length > 0;
+                            const completedReqs = (b.completedRequirements || []).filter(r => reqs.includes(r));
+                            const progress = hasReqs ? Math.round((completedReqs.length / reqs.length) * 100) : b.progress;
+                            
+                            return (
                             <div key={i} className="flex items-center gap-2">
                               <span className="text-[10px] font-bold text-gray-500 w-16 truncate">{b.name}</span>
                               <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-[#4285F4]" style={{ width: `${b.progress}%` }} />
+                                <div className="h-full bg-[#4285F4]" style={{ width: `${progress}%` }} />
                               </div>
-                              <span className="text-[10px] font-bold text-[#4285F4]">{b.progress}%</span>
+                              <span className="text-[10px] font-bold text-[#4285F4]">{progress}%</span>
                             </div>
-                          ))}
+                          )})}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
@@ -735,34 +904,81 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                     <Award size={22} className="text-[#4285F4]" />
                     تقدم الشارات
                   </h4>
-                  {(['badge1', 'badge2', 'badge3'] as const).map((key) => (
+                  {(['badge1', 'badge2', 'badge3'] as const).map((key) => {
+                    const badgeName = editingScout.badges[key].name;
+                    const reqs = badgeRequirements[badgeName] || [];
+                    const completedReqs = (editingScout.badges[key].completedRequirements || []).filter(r => reqs.includes(r));
+                    const hasReqs = reqs.length > 0;
+                    
+                    return (
                     <div key={key} className="space-y-4 p-6 bg-gray-50 rounded-3xl border border-gray-100">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="text-lg font-black text-gray-800 flex items-center gap-3">
                         <Award size={22} className="text-[#4285F4]" />
-                        {editingScout.badges[key].name}
+                        {badgeName}
                       </h4>
                       <div className="flex items-center gap-3">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={editingScout.badges[key].progress}
-                          onChange={(e) => updateBadgeValue(key, 'progress', parseInt(e.target.value) || 0)}
-                          className="w-20 px-3 py-2 rounded-xl border border-gray-200 text-center font-black text-[#4285F4] text-lg"
-                        />
-                        <span className="text-lg font-black text-gray-400">%</span>
+                        {hasReqs ? (
+                          <div className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-center font-black text-[#4285F4] text-lg">
+                            {Math.round((completedReqs.length / reqs.length) * 100)}%
+                          </div>
+                        ) : (
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={editingScout.badges[key].progress}
+                              onChange={(e) => updateBadgeValue(key, 'progress', parseInt(e.target.value) || 0)}
+                              className="w-20 px-3 py-2 rounded-xl border border-gray-200 text-center font-black text-[#4285F4] text-lg"
+                            />
+                            <span className="text-lg font-black text-gray-400">%</span>
+                          </>
+                        )}
                       </div>
                     </div>
 
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={editingScout.badges[key].progress}
-                      onChange={(e) => updateBadgeValue(key, 'progress', parseInt(e.target.value))}
-                      className="w-full h-3 bg-gray-200 rounded-full appearance-none cursor-pointer accent-[#4285F4]"
-                    />
+                    {hasReqs ? (
+                      <div className="space-y-2 bg-white p-4 rounded-2xl border border-gray-100">
+                        <h5 className="text-sm font-bold text-gray-700 mb-3">متطلبات الشارة:</h5>
+                        {reqs.map((req, idx) => {
+                          const isCompleted = completedReqs.includes(req);
+                          return (
+                            <label key={idx} className="flex items-start gap-3 p-2 hover:bg-gray-50 rounded-xl cursor-pointer transition-colors">
+                              <div className="relative flex items-center justify-center mt-0.5">
+                                <input
+                                  type="checkbox"
+                                  checked={isCompleted}
+                                  onChange={(e) => {
+                                    let newCompleted = [...completedReqs];
+                                    if (e.target.checked) {
+                                      newCompleted.push(req);
+                                    } else {
+                                      newCompleted = newCompleted.filter(r => r !== req);
+                                    }
+                                    updateBadgeValue(key, 'completedRequirements', newCompleted);
+                                    updateBadgeValue(key, 'progress', Math.round((newCompleted.length / reqs.length) * 100));
+                                  }}
+                                  className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4] cursor-pointer"
+                                />
+                              </div>
+                              <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                                {req}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={editingScout.badges[key].progress}
+                        onChange={(e) => updateBadgeValue(key, 'progress', parseInt(e.target.value))}
+                        className="w-full h-3 bg-gray-200 rounded-full appearance-none cursor-pointer accent-[#4285F4]"
+                      />
+                    )}
 
                     <div className="space-y-2 pt-2">
                       <label className="text-xs font-black text-gray-500 mr-2 uppercase tracking-wider">ملاحظات المسؤول:</label>
@@ -775,7 +991,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
                       />
                     </div>
                   </div>
-                ))}
+                  )})}
                 </div>
 
                 <button

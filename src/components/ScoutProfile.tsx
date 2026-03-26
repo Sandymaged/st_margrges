@@ -1,13 +1,27 @@
-import React from 'react';
-import { ScoutProfile } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ScoutProfile, BadgeRequirements } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
 import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar } from 'lucide-react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface ScoutProfileViewProps {
   profile: ScoutProfile;
 }
 
 export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
+  const [badgeRequirements, setBadgeRequirements] = useState<BadgeRequirements>({});
+
+  useEffect(() => {
+    const unsubReqs = onSnapshot(doc(db, 'settings', 'badgeRequirements'), (doc) => {
+      if (doc.exists()) {
+        setBadgeRequirements(doc.data() as BadgeRequirements);
+      }
+    });
+
+    return () => unsubReqs();
+  }, []);
+
   const formatDate = (timestamp: any) => {
     if (!timestamp) return 'غير متوفر';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -61,9 +75,9 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <BadgeProgressCard label="شارة 1" badge={profile.badges.badge1} />
-          <BadgeProgressCard label="شارة 2" badge={profile.badges.badge2} />
-          <BadgeProgressCard label="شارة 3" badge={profile.badges.badge3} />
+          <BadgeProgressCard label="شارة 1" badge={profile.badges.badge1} requirements={badgeRequirements[profile.badges.badge1.name] || []} />
+          <BadgeProgressCard label="شارة 2" badge={profile.badges.badge2} requirements={badgeRequirements[profile.badges.badge2.name] || []} />
+          <BadgeProgressCard label="شارة 3" badge={profile.badges.badge3} requirements={badgeRequirements[profile.badges.badge3.name] || []} />
         </div>
       </div>
     </div>

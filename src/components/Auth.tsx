@@ -101,9 +101,9 @@ export default function Auth() {
           stage,
           number: phone,
           badges: {
-            badge1: { name: badge1, progress: 0, notes: '' },
-            badge2: { name: badge2, progress: 0, notes: '' },
-            badge3: { name: badge3, progress: 0, notes: '' },
+            badge1: { name: badge1, progress: 0, notes: '', completedRequirements: [] },
+            badge2: { name: badge2, progress: 0, notes: '', completedRequirements: [] },
+            badge3: { name: badge3, progress: 0, notes: '', completedRequirements: [] },
           },
           role: 'scout',
           createdAt: serverTimestamp(),
