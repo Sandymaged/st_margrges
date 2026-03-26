@@ -5,7 +5,7 @@ import {
   signInWithEmailAndPassword 
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
-import { STAGES, BADGE_OPTIONS, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage } from '../types';
+import { STAGES, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage, DEFAULT_CATEGORIES } from '../types';
 import { 
   LogIn, 
   UserPlus, 
@@ -25,9 +25,8 @@ export default function Auth() {
 
   // Badge Settings
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
-    'أشبال وزهرات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] },
-    'كشاف ومرشدات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] },
-    'متقدم ورائدات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] }
+    categories: DEFAULT_CATEGORIES,
+    requirements: {}
   });
 
   // Form fields
@@ -38,42 +37,52 @@ export default function Auth() {
   const [badge1, setBadge1] = useState('');
   const [badge2, setBadge2] = useState('');
   const [badge3, setBadge3] = useState('');
+  
+  const [selectedCategory2, setSelectedCategory2] = useState('');
+  const [selectedCategory3, setSelectedCategory3] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const newSettings: BadgeSettings = {
-          'أشبال وزهرات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] },
-          'كشاف ومرشدات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] },
-          'متقدم ورائدات': { badge1: [...BADGE_OPTIONS], badge2: [...BADGE_OPTIONS], badge3: [...BADGE_OPTIONS] }
-        };
-        
-        Object.keys(data).forEach(stage => {
-          if (Array.isArray(data[stage])) {
-            newSettings[stage] = {
-              badge1: data[stage],
-              badge2: data[stage],
-              badge3: data[stage]
-            };
-          } else if (data[stage]) {
-            newSettings[stage] = data[stage];
-          }
+        setBadgeSettings({
+          categories: data.categories || DEFAULT_CATEGORIES,
+          requirements: data.requirements || {}
         });
-        
-        setBadgeSettings(newSettings);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Update badge selections when stage changes or settings load
+  // Helper to get badges for a category and stage
+  const getAvailableBadges = (categoryId: string, scoutStage: Stage) => {
+    const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
+    if (!category) return [];
+    
+    // If there are stage-specific badges, use them
+    if (category.stageBadges && category.stageBadges[scoutStage]) {
+      return category.stageBadges[scoutStage] || [];
+    }
+    
+    // Otherwise return all badges in category
+    return category.badges || [];
+  };
+
+  // Update badge selections when settings or stage/category change
   useEffect(() => {
-    const stageBadges = badgeSettings[stage] || { badge1: [], badge2: [], badge3: [] };
-    setBadge1(stageBadges.badge1?.[0] || '');
-    setBadge2(stageBadges.badge2?.[0] || '');
-    setBadge3(stageBadges.badge3?.[0] || '');
-  }, [stage, badgeSettings]);
+    const badges1 = getAvailableBadges('scout', stage);
+    if (!badges1.includes(badge1) && badges1.length > 0) setBadge1(badges1[0]);
+    
+    if (selectedCategory2) {
+      const badges2 = getAvailableBadges(selectedCategory2, stage);
+      if (!badges2.includes(badge2) && badges2.length > 0) setBadge2(badges2[0]);
+    }
+    
+    if (selectedCategory3) {
+      const badges3 = getAvailableBadges(selectedCategory3, stage);
+      if (!badges3.includes(badge3) && badges3.length > 0) setBadge3(badges3[0]);
+    }
+  }, [badgeSettings, stage, selectedCategory2, selectedCategory3]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,7 +137,8 @@ export default function Auth() {
     }
   };
 
-  const currentStageBadges = badgeSettings[stage] || { badge1: [], badge2: [], badge3: [] };
+  const scoutBadges = badgeSettings.categories.find(c => c.id === 'scout')?.badges || [];
+  const allBadges = badgeSettings.categories.flatMap(c => c.badges);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[80vh] py-12">
@@ -219,39 +229,80 @@ export default function Auth() {
                   </select>
                 </div>
 
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-gray-500">شارة 1</label>
-                    <select
-                      value={badge1}
-                      onChange={(e) => setBadge1(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none bg-white text-sm"
-                      required
-                    >
-                      {currentStageBadges.badge1?.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-gray-500">شارة 2</label>
-                    <select
-                      value={badge2}
-                      onChange={(e) => setBadge2(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none bg-white text-sm"
-                      required
-                    >
-                      {currentStageBadges.badge2?.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-gray-500">شارة 3</label>
-                    <select
-                      value={badge3}
-                      onChange={(e) => setBadge3(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none bg-white text-sm"
-                      required
-                    >
-                      {currentStageBadges.badge3?.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
+                <div className="md:col-span-2 space-y-6 pt-4 border-t">
+                  <h4 className="text-sm font-black text-gray-700">اختر شاراتك:</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Badge 1 */}
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-gray-700">شارة 1 (كشفية)</label>
+                        <select
+                          value={badge1}
+                          onChange={(e) => setBadge1(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm"
+                          required
+                        >
+                          <option value="">-- اختر شارة --</option>
+                          {getAvailableBadges('scout', stage).map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Badge 2 */}
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">تصنيف شارة 2</label>
+                        <select
+                          value={selectedCategory2}
+                          onChange={(e) => setSelectedCategory2(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-gray-200 outline-none bg-gray-50 text-xs font-bold"
+                        >
+                          <option value="">-- اختر تصنيف --</option>
+                          {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-gray-700">شارة 2</label>
+                        <select
+                          value={badge2}
+                          onChange={(e) => setBadge2(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50"
+                          required
+                          disabled={!selectedCategory2}
+                        >
+                          <option value="">-- اختر شارة --</option>
+                          {selectedCategory2 && getAvailableBadges(selectedCategory2, stage).map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Badge 3 */}
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">تصنيف شارة 3</label>
+                        <select
+                          value={selectedCategory3}
+                          onChange={(e) => setSelectedCategory3(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-gray-200 outline-none bg-gray-50 text-xs font-bold"
+                        >
+                          <option value="">-- اختر تصنيف --</option>
+                          {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-gray-700">شارة 3</label>
+                        <select
+                          value={badge3}
+                          onChange={(e) => setBadge3(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50"
+                          required
+                          disabled={!selectedCategory3}
+                        >
+                          <option value="">-- اختر شارة --</option>
+                          {selectedCategory3 && getAvailableBadges(selectedCategory3, stage).map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </>
@@ -260,7 +311,7 @@ export default function Auth() {
 
           <div className="space-y-4">
             <button
-              disabled={loading || (!isLogin && (!currentStageBadges.badge1?.length || !currentStageBadges.badge2?.length || !currentStageBadges.badge3?.length))}
+              disabled={loading || (!isLogin && (!badge1 || !badge2 || !badge3))}
               type="submit"
               className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
             >
@@ -278,7 +329,7 @@ export default function Auth() {
               <button
                 type="button"
                 onClick={() => {
-                  const adminNumber = '01552698433';
+                  const adminNumber = '01555165366';
                   const message = `أهلاً، أنا عضو في الكشافة ونسيت كلمة المرور الخاصة بي. رقم هاتفي هو: ${phone}`;
                   window.open(`https://wa.me/2${adminNumber}?text=${encodeURIComponent(message)}`, '_blank');
                 }}

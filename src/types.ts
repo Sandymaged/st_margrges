@@ -1,10 +1,18 @@
-export type Stage = 'أشبال وزهرات' | 'كشاف ومرشدات' | 'متقدم ورائدات';
+export type Stage = 'أشبال وزهرات' | 'كشاف ومرشدات' | 'متقدم ورائدات' | 'قادة وجوالة';
 
 export interface BadgeProgress {
   name: string;
   progress: number; // 0 to 100
   notes: string;
   completedRequirements?: string[];
+}
+
+export interface AdminPermissions {
+  canManagePermissions?: boolean;
+  canManageAllBadges: boolean;
+  canDeleteAccounts: boolean;
+  managedStages: Stage[];
+  managedBadges: string[];
 }
 
 export interface ScoutProfile {
@@ -19,6 +27,7 @@ export interface ScoutProfile {
     badge3: BadgeProgress;
   };
   role: 'scout' | 'admin';
+  permissions?: AdminPermissions;
   createdAt: any;
   joinDate: any;
 }
@@ -26,28 +35,44 @@ export interface ScoutProfile {
 export const STAGES: Stage[] = [
   'أشبال وزهرات',
   'كشاف ومرشدات',
-  'متقدم ورائدات'
+  'متقدم ورائدات',
+  'قادة وجوالة'
 ];
 
-export type BadgeSettings = Record<string, {
-  badge1: string[];
-  badge2: string[];
-  badge3: string[];
-}>;
+export interface BadgeCategory {
+  id: string;
+  name: string;
+  badges: string[];
+  stageBadges?: Partial<Record<Stage, string[]>>;
+}
 
-export type BadgeRequirements = Record<string, string[]>;
+export interface BadgeSettings {
+  categories: BadgeCategory[];
+  requirements: Record<string, string[]>;
+}
 
-export const BADGE_OPTIONS = [
-  'المسعف',
-  'صديق البيئة',
-  'المصور',
-  'المبرمج',
-  'الطباخ',
-  'الرياضي',
-  'الفنان',
-  'المخترع',
-  'القارئ',
-  'المنقذ'
+export const DEFAULT_CATEGORIES: BadgeCategory[] = [
+  {
+    id: 'scout',
+    name: 'شارات كشفي',
+    badges: ['مخيم', 'مخاطب الإشارة', 'مقتفي الأثر', 'طاهي', 'مسعف']
+  },
+  {
+    id: 'artistic',
+    name: 'شارات فنية',
+    badges: ['رسام', 'مصور', 'مسامر', 'هاوي الأشغال اليدوية', 'موسيقى']
+  },
+  {
+    id: 'cultural',
+    name: 'شارات ثقافية',
+    badges: ['مترجم', 'مبرمج', 'مصمم جرافيك', 'صحفي', 'مطالع', 'فيديو (مونتاج)']
+  }
 ];
+
+export const BADGE_LABELS = {
+  badge1: "شارة 1 'كشفي'",
+  badge2: 'شارة 2',
+  badge3: 'شارة 3'
+};
 
 export const PHONE_REGEX = /^01[0125]\d{8}$/;

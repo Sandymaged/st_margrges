@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ScoutProfile, BadgeRequirements } from '../types';
+import { ScoutProfile, BadgeSettings } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
 import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar } from 'lucide-react';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -10,16 +10,23 @@ interface ScoutProfileViewProps {
 }
 
 export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
-  const [badgeRequirements, setBadgeRequirements] = useState<BadgeRequirements>({});
+  const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
+    categories: [],
+    requirements: {}
+  });
 
   useEffect(() => {
-    const unsubReqs = onSnapshot(doc(db, 'settings', 'badgeRequirements'), (doc) => {
-      if (doc.exists()) {
-        setBadgeRequirements(doc.data() as BadgeRequirements);
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setBadgeSettings({
+          categories: data.categories || [],
+          requirements: data.requirements || {}
+        });
       }
     });
 
-    return () => unsubReqs();
+    return () => unsubSettings();
   }, []);
 
   const formatDate = (timestamp: any) => {
@@ -75,9 +82,9 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <BadgeProgressCard label="شارة 1" badge={profile.badges.badge1} requirements={badgeRequirements[profile.badges.badge1.name] || []} />
-          <BadgeProgressCard label="شارة 2" badge={profile.badges.badge2} requirements={badgeRequirements[profile.badges.badge2.name] || []} />
-          <BadgeProgressCard label="شارة 3" badge={profile.badges.badge3} requirements={badgeRequirements[profile.badges.badge3.name] || []} />
+          <BadgeProgressCard label="شارة 1" badge={profile.badges.badge1} requirements={(badgeSettings.requirements || {})[profile.badges.badge1.name] || []} />
+          <BadgeProgressCard label="شارة 2" badge={profile.badges.badge2} requirements={(badgeSettings.requirements || {})[profile.badges.badge2.name] || []} />
+          <BadgeProgressCard label="شارة 3" badge={profile.badges.badge3} requirements={(badgeSettings.requirements || {})[profile.badges.badge3.name] || []} />
         </div>
       </div>
     </div>
