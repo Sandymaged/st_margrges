@@ -123,6 +123,12 @@ enum OperationType {
   const canManageAllBadges = isSuperAdmin || currentProfile?.permissions?.canManageAllBadges;
   const canDeleteAccounts = isSuperAdmin || currentProfile?.permissions?.canDeleteAccounts;
   
+  const canDeleteThisScout = (scout: ScoutProfile) => {
+    if (scout.uid === currentProfile?.uid) return false;
+    if (scout.role === 'admin') return isSuperAdmin;
+    return canDeleteAccounts;
+  };
+  
   const canEditBadge = (scoutStage: Stage, badgeName: string) => {
     if (canManageAllBadges) return true;
     if (!currentProfile?.permissions) return false;
@@ -413,7 +419,10 @@ enum OperationType {
   };
 
   const handleDeleteScout = async () => {
-    if (!deletingScout || !canDeleteAccounts) return;
+    if (!deletingScout) return;
+    
+    const allowed = canDeleteThisScout(deletingScout);
+    if (!allowed) return;
     
     setDeleteLoading(true);
     try {
@@ -910,7 +919,7 @@ enum OperationType {
                               <Edit2 size={18} />
                             </button>
                           )}
-                          {canDeleteAccounts && (
+                          {canDeleteThisScout(scout) && (
                             <button
                               onClick={() => setDeletingScout(scout)}
                               className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"

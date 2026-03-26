@@ -79,7 +79,11 @@ service cloud.firestore {
         )
       );
       
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() && (
+        resource.data.role != 'admin' || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions.canManagePermissions == true ||
+        request.auth.token.email == "begolbahaa98@gmail.com"
+      );
     }
   }
 }
