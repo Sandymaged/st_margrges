@@ -139,9 +139,6 @@ export default function Auth() {
               src="/logo.png" 
               alt="Scouts Logo" 
               className="h-full w-full object-contain"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = 'https://api.dicebear.com/7.x/initials/svg?seed=MG&backgroundColor=ffffff&transitionDuration=0';
-              }}
             />
           </div>
           <h2 className="text-3xl font-black text-gray-800">

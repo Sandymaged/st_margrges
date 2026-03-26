@@ -47,9 +47,6 @@ export default function Layout({ children, user, profile, view, setView }: Layou
                 src="/logo.png" 
                 alt="Scouts Logo" 
                 className="h-full w-full object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://api.dicebear.com/7.x/initials/svg?seed=MG&backgroundColor=ffffff&transitionDuration=0';
-                }}
               />
             </div>
             <h1 className="text-xl font-bold">مجموعة مارجرجس الكشفية</h1>
