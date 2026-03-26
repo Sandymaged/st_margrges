@@ -48,7 +48,7 @@ export interface BadgeCategory {
 
 export interface BadgeSettings {
   categories: BadgeCategory[];
-  requirements: Record<string, string[]>;
+  requirements: Record<string, Partial<Record<Stage | 'all', string[]>>>;
 }
 
 export const DEFAULT_CATEGORIES: BadgeCategory[] = [

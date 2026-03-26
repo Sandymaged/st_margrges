@@ -54,6 +54,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
   const [selectedStageForNewBadge, setSelectedStageForNewBadge] = useState<Stage | 'all'>('all');
+  const [selectedStageForNewReq, setSelectedStageForNewReq] = useState<Stage | 'all'>('all');
   const [selectedCategoryForBadgeSelection, setSelectedCategoryForBadgeSelection] = useState<Record<'badge1' | 'badge2' | 'badge3', string | null>>({
     badge1: 'scout',
     badge2: null,
@@ -351,12 +352,25 @@ enum OperationType {
     }
   };
 
-  const handleAddRequirement = async (badgeName: string, req: string) => {
+  const handleAddRequirement = async (badgeName: string, req: string, stage: Stage | 'all' = 'all') => {
     if (!badgeName || !req.trim()) return;
+    
+    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+    
+    let newBadgeReqs: Partial<Record<Stage | 'all', string[]>>;
+    if (Array.isArray(currentBadgeReqs)) {
+      newBadgeReqs = { all: [...currentBadgeReqs] };
+    } else {
+      newBadgeReqs = { ...currentBadgeReqs };
+    }
+    
+    newBadgeReqs[stage] = [...(newBadgeReqs[stage] || []), req.trim()];
+
     const updatedRequirements = {
       ...(badgeSettings.requirements || {}),
-      [badgeName]: [...((badgeSettings.requirements || {})[badgeName] || []), req.trim()]
+      [badgeName]: newBadgeReqs
     };
+    
     try {
       await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirements: updatedRequirements });
       setNewRequirementInput('');
@@ -366,18 +380,52 @@ enum OperationType {
     }
   };
 
-  const handleRemoveRequirement = async (badgeName: string, req: string) => {
+  const handleRemoveRequirement = async (badgeName: string, req: string, stage: Stage | 'all' = 'all') => {
     if (!window.confirm('هل أنت متأكد من حذف هذا البند؟')) return;
+    
+    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+    
+    let newBadgeReqs: Partial<Record<Stage | 'all', string[]>>;
+    if (Array.isArray(currentBadgeReqs)) {
+      newBadgeReqs = { all: [...currentBadgeReqs] };
+    } else {
+      newBadgeReqs = { ...currentBadgeReqs };
+    }
+    
+    if (newBadgeReqs[stage]) {
+      newBadgeReqs[stage] = newBadgeReqs[stage]!.filter(r => r !== req);
+    }
+
     const updatedRequirements = {
       ...(badgeSettings.requirements || {}),
-      [badgeName]: ((badgeSettings.requirements || {})[badgeName] || []).filter(r => r !== req)
+      [badgeName]: newBadgeReqs
     };
+    
     try {
       await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirements: updatedRequirements });
       setMessage({ type: 'success', text: 'تم حذف البند بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
     }
+  };
+
+  const getReqsForStage = (badgeName: string, stage: Stage | 'all') => {
+    const badgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+    if (Array.isArray(badgeReqs)) {
+      return stage === 'all' ? badgeReqs : [];
+    }
+    return badgeReqs[stage] || [];
+  };
+
+  const getScoutBadgeRequirements = (badgeName: string, stage: Stage) => {
+    const badgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+    if (Array.isArray(badgeReqs)) {
+      return badgeReqs;
+    }
+    return [
+      ...(badgeReqs.all || []),
+      ...(badgeReqs[stage] || [])
+    ];
   };
 
   const handleUpdatePermissions = async (e: React.FormEvent) => {
@@ -632,7 +680,10 @@ enum OperationType {
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none bg-white font-bold text-gray-700"
                   >
                     <option value="">-- اختر شارة --</option>
-                    {badgeSettings.categories.flatMap(c => c.badges).map(b => (
+                    {Array.from(new Set(badgeSettings.categories.flatMap(c => [
+                      ...c.badges,
+                      ...Object.values(c.stageBadges || {}).flat()
+                    ]))).map(b => (
                       <option key={b} value={b}>{b}</option>
                     ))}
                   </select>
@@ -645,48 +696,87 @@ enum OperationType {
                         بنود شارة: {selectedBadgeForReq}
                       </h3>
 
-                      <div className="space-y-3 mb-6">
-                        {(badgeSettings.requirements[selectedBadgeForReq] || []).map((req, idx) => (
-                          <div key={idx} className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                            <div className="flex items-center gap-3">
-                              <div className="w-6 h-6 rounded-full bg-blue-100 text-[#4285F4] flex items-center justify-center text-xs font-bold shrink-0">
-                                {idx + 1}
+                      <div className="space-y-6 mb-6">
+                        {/* All Stages */}
+                        <div>
+                          <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                            لكل المراحل
+                          </h4>
+                          <div className="space-y-2">
+                            {getReqsForStage(selectedBadgeForReq, 'all').map((req, idx) => (
+                              <div key={idx} className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                                <span className="font-bold text-gray-700 text-sm">{req}</span>
+                                <button 
+                                  onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
+                                  className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
                               </div>
-                              <span className="font-bold text-gray-700">{req}</span>
+                            ))}
+                            {getReqsForStage(selectedBadgeForReq, 'all').length === 0 && (
+                              <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود عامة</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Specific Stages */}
+                        {STAGES.map(stage => (
+                          <div key={stage}>
+                            <h4 className="text-xs font-black text-[#4285F4] uppercase tracking-wider mb-3 flex items-center gap-2">
+                              <div className="w-1.5 h-1.5 rounded-full bg-[#4285F4]" />
+                              مرحلة: {stage}
+                            </h4>
+                            <div className="space-y-2">
+                              {getReqsForStage(selectedBadgeForReq, stage).map((req, idx) => (
+                                <div key={idx} className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                                  <span className="font-bold text-gray-700 text-sm">{req}</span>
+                                  <button 
+                                    onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
+                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              ))}
+                              {getReqsForStage(selectedBadgeForReq, stage).length === 0 && (
+                                <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود لهذه المرحلة</p>
+                              )}
                             </div>
-                            <button 
-                              onClick={() => handleRemoveRequirement(selectedBadgeForReq, req)}
-                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"
-                              title="حذف البند"
-                            >
-                              <Trash2 size={18} />
-                            </button>
                           </div>
                         ))}
-                        {(badgeSettings.requirements[selectedBadgeForReq] || []).length === 0 && (
-                          <p className="text-sm text-gray-400 text-center py-8 bg-white rounded-xl border border-dashed border-gray-200">
-                            لا توجد بنود لهذه الشارة حتى الآن
-                          </p>
-                        )}
                       </div>
 
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="أضف بنداً جديداً..."
-                          value={newRequirementInput}
-                          onChange={(e) => setNewRequirementInput(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && handleAddRequirement(selectedBadgeForReq, newRequirementInput)}
-                          className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
-                        />
-                        <button
-                          onClick={() => handleAddRequirement(selectedBadgeForReq, newRequirementInput)}
-                          disabled={!newRequirementInput.trim()}
-                          className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
-                        >
-                          <Plus size={20} />
-                          إضافة
-                        </button>
+                      <div className="space-y-3 pt-6 border-t border-gray-200">
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedStageForNewReq}
+                            onChange={(e) => setSelectedStageForNewReq(e.target.value as Stage | 'all')}
+                            className="flex-1 px-4 py-2 rounded-xl border border-gray-200 outline-none text-xs font-bold bg-white"
+                          >
+                            <option value="all">لكل المراحل</option>
+                            {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="أضف بنداً جديداً..."
+                            value={newRequirementInput}
+                            onChange={(e) => setNewRequirementInput(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && handleAddRequirement(selectedBadgeForReq, newRequirementInput, selectedStageForNewReq)}
+                            className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                          />
+                          <button
+                            onClick={() => handleAddRequirement(selectedBadgeForReq, newRequirementInput, selectedStageForNewReq)}
+                            disabled={!newRequirementInput.trim()}
+                            className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
+                          >
+                            <Plus size={20} />
+                            إضافة
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -731,7 +821,7 @@ enum OperationType {
                 <p className="text-sm font-bold text-gray-500">شارات قيد التقدم</p>
                 <h3 className="text-2xl font-black text-gray-800">
                   {scouts.reduce((acc, s) => acc + [s.badges.badge1, s.badges.badge2, s.badges.badge3].filter(b => {
-                    const reqs = badgeSettings.requirements[b.name] || [];
+                    const reqs = getScoutBadgeRequirements(b.name, s.stage);
                     const hasReqs = reqs.length > 0;
                     const completedReqs = (b.completedRequirements || []).filter(r => reqs.includes(r));
                     const progress = hasReqs ? Math.round((completedReqs.length / reqs.length) * 100) : b.progress;
@@ -875,7 +965,7 @@ enum OperationType {
                       <td className="px-6 py-4">
                         <div className="flex flex-col gap-2 min-w-[200px]">
                           {[scout.badges.badge1, scout.badges.badge2, scout.badges.badge3].map((b, i) => {
-                            const reqs = (badgeSettings.requirements || {})[b.name] || [];
+                            const reqs = getScoutBadgeRequirements(b.name, scout.stage);
                             const hasReqs = reqs.length > 0;
                             const completedReqs = (b.completedRequirements || []).filter(r => reqs.includes(r));
                             const progress = hasReqs ? Math.round((completedReqs.length / reqs.length) * 100) : b.progress;
@@ -1131,7 +1221,7 @@ enum OperationType {
                   {(['badge1', 'badge2', 'badge3'] as const).map((key) => {
                     const badge = editingScout.badges[key];
                     const badgeName = badge.name;
-                    const reqs = (badgeSettings.requirements || {})[badgeName] || [];
+                    const reqs = getScoutBadgeRequirements(badgeName, editingScout.stage);
                     const completedReqs = (badge.completedRequirements || []).filter(r => reqs.includes(r));
                     const hasReqs = reqs.length > 0;
                     const canEdit = canEditBadge(editingScout.stage, badgeName);
