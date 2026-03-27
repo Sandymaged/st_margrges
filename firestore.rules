@@ -34,7 +34,7 @@ service cloud.firestore {
         request.auth.token.email == "begolbahaa98@gmail.com" ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.number == '01552698433' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.number == '01555165366' ||
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canManagePermissions', false) == true
         ))
       );
@@ -85,7 +85,8 @@ service cloud.firestore {
       
       allow delete: if isAdmin() && (
         resource.data.role != 'admin' || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions.canManagePermissions == true ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canManagePermissions', false) == true ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.number == '01555165366' ||
         request.auth.token.email == "begolbahaa98@gmail.com"
       );
     }

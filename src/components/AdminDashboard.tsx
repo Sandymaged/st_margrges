@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { 
   ScoutProfile, 
@@ -35,18 +35,22 @@ import {
   Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import ScoreInput from './ScoreInput';
 
 interface AdminDashboardProps {
   currentProfile?: ScoutProfile;
 }
 
 export default function AdminDashboard({ currentProfile }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'scouts' | 'settings'>('scouts');
+  const [activeTab, setActiveTab] = useState<'scouts' | 'settings' | 'grading'>('scouts');
+  const [gradingSelectedBadge, setGradingSelectedBadge] = useState<string>('');
+  const [gradingSearchTerm, setGradingSearchTerm] = useState<string>('');
   const [activeBadgeTab, setActiveBadgeTab] = useState<'badge1' | 'badge2' | 'badge3'>('badge1');
   const [scouts, setScouts] = useState<ScoutProfile[]>([]);
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
     categories: DEFAULT_CATEGORIES,
-    requirements: {}
+    requirements: {},
+    requirementMaxScores: {}
   });
   const [selectedBadgeForReq, setSelectedBadgeForReq] = useState<string>('');
   const [newRequirementInput, setNewRequirementInput] = useState('');
@@ -102,7 +106,7 @@ enum OperationType {
   WRITE = 'write'
 }
 
-  const isSuperAdmin = currentProfile?.number === '01552698433' || currentProfile?.email === 'begolbahaa98@gmail.com' || currentProfile?.permissions?.canManagePermissions;
+  const isSuperAdmin = currentProfile?.number === '01555165366' || currentProfile?.email === 'begolbahaa98@gmail.com' || currentProfile?.permissions?.canManagePermissions;
 
   const handleGrantAllPermissions = () => {
     setPermissionsForm({
@@ -185,12 +189,14 @@ enum OperationType {
         const data = docSnap.data() as BadgeSettings;
         setBadgeSettings({
           categories: data.categories || DEFAULT_CATEGORIES,
-          requirements: data.requirements || {}
+          requirements: data.requirements || {},
+          requirementMaxScores: data.requirementMaxScores || {}
         });
       } else {
         setBadgeSettings({
           categories: DEFAULT_CATEGORIES,
-          requirements: {}
+          requirements: {},
+          requirementMaxScores: {}
         });
       }
     });
@@ -264,7 +270,7 @@ enum OperationType {
     }
   };
 
-  const updateBadgeValue = (badgeKey: 'badge1' | 'badge2' | 'badge3', field: 'progress' | 'notes' | 'completedRequirements', value: any) => {
+  const updateBadgeValue = (badgeKey: 'badge1' | 'badge2' | 'badge3', field: 'progress' | 'notes' | 'completedRequirements' | 'requirementScores', value: any) => {
     setEditingScout(prev => {
       if (!prev) return prev;
       return {
@@ -278,6 +284,36 @@ enum OperationType {
         }
       };
     });
+  };
+
+  const handleUpdateScoutBadge = async (scout: ScoutProfile, badgeKey: 'badge1' | 'badge2' | 'badge3', updates: Partial<BadgeProgress>) => {
+    try {
+      const currentBadge = scout.badges[badgeKey];
+      
+      // Calculate new progress if scores or completed requirements changed
+      let newProgress = currentBadge.progress;
+      if (updates.requirementScores !== undefined || updates.completedRequirements !== undefined) {
+        const reqs = getScoutBadgeRequirements(currentBadge.name, scout.stage);
+        const completedReqs = updates.completedRequirements !== undefined ? updates.completedRequirements : (currentBadge.completedRequirements || []);
+        const scores = updates.requirementScores !== undefined ? updates.requirementScores : (currentBadge.requirementScores || {});
+        newProgress = calculateBadgeProgress(currentBadge.name, reqs, completedReqs, scores);
+      }
+
+      const updatedBadge = {
+        ...currentBadge,
+        ...updates,
+        progress: newProgress
+      };
+
+      await updateDoc(doc(db, 'users', scout.uid), {
+        [`badges.${badgeKey}`]: updatedBadge
+      });
+      
+      setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+      setMessage({ type: 'error', text: 'حدث خطأ أثناء حفظ التقييم' });
+    }
   };
 
   const handleAddCategory = async () => {
@@ -430,6 +466,45 @@ enum OperationType {
     }
   };
 
+  const handleSetRequirementMaxScore = async (badgeName: string, req: string, maxScore: number) => {
+    const updatedMaxScores = {
+      ...(badgeSettings.requirementMaxScores || {})
+    };
+    
+    if (!updatedMaxScores[badgeName]) {
+      updatedMaxScores[badgeName] = {};
+    }
+    
+    updatedMaxScores[badgeName][req] = maxScore;
+    
+    try {
+      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirementMaxScores: updatedMaxScores });
+      setMessage({ type: 'success', text: 'تم تحديث تقييم البند بنجاح' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+    }
+  };
+
+  const calculateBadgeProgress = (badgeName: string, reqs: string[], completedReqs: string[], requirementScores: Record<string, number> = {}) => {
+    if (reqs.length === 0) return 0;
+    
+    let totalScore = 0;
+    let totalMaxScore = 0;
+    
+    reqs.forEach(req => {
+      const maxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[req] || 0;
+      if (maxScore > 0) {
+        totalMaxScore += maxScore;
+        totalScore += requirementScores[req] || 0;
+      } else {
+        totalMaxScore += 1;
+        totalScore += completedReqs.includes(req) ? 1 : 0;
+      }
+    });
+    
+    return totalMaxScore > 0 ? Math.round((totalScore / totalMaxScore) * 100) : 0;
+  };
+
   const getReqsForStage = (badgeName: string, stage: Stage | 'all') => {
     const badgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
     if (Array.isArray(badgeReqs)) {
@@ -495,8 +570,41 @@ enum OperationType {
     
     setDeleteLoading(true);
     try {
+      // 1. Delete from Firestore
       await deleteDoc(doc(db, 'users', deletingScout.uid));
-      setMessage({ type: 'success', text: 'تم حذف الحساب بنجاح' });
+      
+      // 2. Try to delete from Firebase Authentication via our backend API
+      const user = auth.currentUser;
+      if (user) {
+        const adminToken = await user.getIdToken();
+        try {
+          const response = await fetch('/api/admin/delete-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: deletingScout.uid, adminToken })
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.warn('Authentication deletion failed:', errorData.error);
+            setMessage({ 
+              type: 'success', 
+              text: 'تم حذف بيانات الكشاف من قاعدة البيانات، ولكن يرجى حذف حسابه يدوياً من لوحة تحكم Firebase (Authentication) لضمان الحذف الكامل.' 
+            });
+          } else {
+            setMessage({ type: 'success', text: 'تم حذف الحساب بالكامل بنجاح' });
+          }
+        } catch (apiError) {
+          console.error('API Error deleting user:', apiError);
+          setMessage({ 
+            type: 'success', 
+            text: 'تم حذف بيانات الكشاف من قاعدة البيانات، ولكن تعذر الاتصال بالخادم لحذف حسابه من نظام الدخول.' 
+          });
+        }
+      } else {
+        setMessage({ type: 'success', text: 'تم حذف الحساب من قاعدة البيانات' });
+      }
+      
       setDeletingScout(null);
     } catch (error) {
       handleFirestoreError(error, 'delete', `users/${deletingScout.uid}`);
@@ -527,6 +635,17 @@ enum OperationType {
         >
           <Users size={20} />
           إدارة الكشافة
+        </button>
+        <button
+          onClick={() => setActiveTab('grading')}
+          className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all ${
+            activeTab === 'grading' 
+              ? 'bg-[#4285F4] text-white shadow-md' 
+              : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
+          }`}
+        >
+          <BarChart3 size={20} />
+          تقييم البنود
         </button>
         {canManageAllBadges && (
           <button
@@ -767,14 +886,27 @@ enum OperationType {
                           </h4>
                           <div className="space-y-2">
                             {getReqsForStage(selectedBadgeForReq, 'all').map((req, idx) => (
-                              <div key={idx} className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                                <span className="font-bold text-gray-700 text-sm">{req}</span>
-                                <button 
-                                  onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
-                                  className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
+                              <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
+                                <span className="font-bold text-gray-700 text-sm flex-1">{req}</span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+                                    <span className="text-xs font-bold text-gray-500">التقييم من:</span>
+                                    <input 
+                                      key={`${selectedBadgeForReq}-${req}-${badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}`}
+                                      type="number" 
+                                      min="0"
+                                      className="w-16 text-center bg-transparent border-none outline-none text-sm font-bold text-[#4285F4]"
+                                      defaultValue={badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}
+                                      onBlur={(e) => handleSetRequirementMaxScore(selectedBadgeForReq, req, parseInt(e.target.value) || 0)}
+                                    />
+                                  </div>
+                                  <button 
+                                    onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
+                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
                               </div>
                             ))}
                             {getReqsForStage(selectedBadgeForReq, 'all').length === 0 && (
@@ -792,14 +924,27 @@ enum OperationType {
                             </h4>
                             <div className="space-y-2">
                               {getReqsForStage(selectedBadgeForReq, stage).map((req, idx) => (
-                                <div key={idx} className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                                  <span className="font-bold text-gray-700 text-sm">{req}</span>
-                                  <button 
-                                    onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
-                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
+                                <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
+                                  <span className="font-bold text-gray-700 text-sm flex-1">{req}</span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+                                      <span className="text-xs font-bold text-gray-500">التقييم من:</span>
+                                      <input 
+                                        key={`${selectedBadgeForReq}-${req}-${badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}`}
+                                        type="number" 
+                                        min="0"
+                                        className="w-16 text-center bg-transparent border-none outline-none text-sm font-bold text-[#4285F4]"
+                                        defaultValue={badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}
+                                        onBlur={(e) => handleSetRequirementMaxScore(selectedBadgeForReq, req, parseInt(e.target.value) || 0)}
+                                      />
+                                    </div>
+                                    <button 
+                                      onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
+                                      className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                               {getReqsForStage(selectedBadgeForReq, stage).length === 0 && (
@@ -853,6 +998,191 @@ enum OperationType {
             </div>
           )}
         </div>
+      ) : activeTab === 'grading' ? (
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
+          <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center border-b border-gray-100 pb-6">
+            <h2 className="text-2xl font-black text-gray-800">تقييم البنود</h2>
+            <div className="flex gap-4 w-full md:w-auto">
+              <div className="relative flex-1 md:w-64">
+                <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                <input
+                  type="text"
+                  placeholder="ابحث عن كشاف..."
+                  value={gradingSearchTerm}
+                  onChange={(e) => setGradingSearchTerm(e.target.value)}
+                  className="w-full pl-4 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#4285F4] focus:border-transparent outline-none font-bold text-gray-700 transition-all"
+                />
+              </div>
+              <select
+                value={gradingSelectedBadge}
+                onChange={(e) => setGradingSelectedBadge(e.target.value)}
+                className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700"
+              >
+                <option value="">اختر الشارة للتقييم</option>
+                {Array.from(new Set(scouts.flatMap(s => [s.badges.badge1.name, s.badges.badge2.name, s.badges.badge3.name])))
+                  .filter(Boolean)
+                  .filter(badgeName => canManageAllBadges || currentProfile?.permissions?.managedBadges.includes(badgeName))
+                  .map(badgeName => (
+                  <option key={badgeName} value={badgeName}>{badgeName}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
+          {gradingSelectedBadge ? (
+            <div className="space-y-8">
+              {['أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات'].map(stage => {
+                  const stageScouts = scouts.filter(s => {
+                    if (s.stage !== stage) return false;
+                    const hasBadge = s.badges.badge1.name === gradingSelectedBadge || 
+                                     s.badges.badge2.name === gradingSelectedBadge || 
+                                     s.badges.badge3.name === gradingSelectedBadge;
+                    if (!hasBadge) return false;
+                    if (gradingSearchTerm) {
+                      const search = gradingSearchTerm.toLowerCase().trim();
+                      return s.name.toLowerCase().includes(search) || s.number.includes(search);
+                    }
+                    return true;
+                  });
+
+                if (stageScouts.length === 0) return null;
+
+                const stageReqs = getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage);
+                if (stageReqs.length === 0) return null;
+
+                return (
+                  <div key={stage} className="space-y-4">
+                    <h3 className="text-xl font-bold text-[#4285F4]">{stage}</h3>
+                    <div className="overflow-x-auto border border-gray-200 rounded-2xl">
+                      <table className="w-full text-right border-collapse min-w-max">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200">
+                            <th className="p-4 font-bold text-gray-600 w-64 sticky right-0 bg-gray-50 z-10 border-l border-gray-200">بيانات الكشاف</th>
+                            {stageReqs.map((req, idx) => {
+                              const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
+                              return (
+                                <th key={idx} className="p-4 font-bold text-gray-600 min-w-[200px] border-l border-gray-200 last:border-l-0">
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-sm truncate" title={req}>{req}</span>
+                                    {maxScore && maxScore > 0 && (
+                                      <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full w-fit">
+                                        من {maxScore}
+                                      </span>
+                                    )}
+                                  </div>
+                                </th>
+                              );
+                            })}
+                            <th className="p-4 font-bold text-gray-600 w-32 border-l border-gray-200">النسبة</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stageScouts.map(scout => {
+                            const badgeKey = scout.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
+                                           : scout.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+                                           : 'badge3';
+                            const badge = scout.badges[badgeKey];
+                            const completedReqs = badge.completedRequirements || [];
+                            const scores = badge.requirementScores || {};
+                            const progress = calculateBadgeProgress(gradingSelectedBadge, stageReqs, completedReqs, scores);
+
+                            return (
+                              <tr key={scout.uid} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
+                                <td className="p-4 sticky right-0 bg-white z-10 border-l border-gray-200">
+                                  <div className="flex flex-col">
+                                    <span className="font-bold text-gray-800">{scout.name}</span>
+                                    <span className="text-sm text-gray-500">{scout.number}</span>
+                                  </div>
+                                </td>
+                                {stageReqs.map((req, idx) => {
+                                  const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
+                                  const isCompleted = completedReqs.includes(req);
+                                  const currentScore = scores[req];
+                                  const canEdit = canEditBadge(scout.stage, gradingSelectedBadge);
+
+                                  return (
+                                    <td key={idx} className="p-4 border-l border-gray-200 last:border-l-0">
+                                      {maxScore && maxScore > 0 ? (
+                                        <div className="flex items-center gap-2">
+                                          <ScoreInput
+                                            maxScore={maxScore}
+                                            currentScore={currentScore}
+                                            canEdit={canEdit}
+                                            onSave={(numVal) => {
+                                              const newScores = { ...scores };
+                                              if (numVal === undefined) {
+                                                delete newScores[req];
+                                              } else {
+                                                newScores[req] = numVal;
+                                              }
+                                              
+                                              // Also update completion status if needed
+                                              let newCompleted = [...completedReqs];
+                                              if (numVal !== undefined && numVal > 0 && !isCompleted) {
+                                                newCompleted.push(req);
+                                              } else if ((numVal === undefined || numVal === 0) && isCompleted) {
+                                                newCompleted = newCompleted.filter(r => r !== req);
+                                              }
+
+                                              handleUpdateScoutBadge(scout, badgeKey, {
+                                                requirementScores: newScores,
+                                                completedRequirements: newCompleted
+                                              });
+                                            }}
+                                          />
+                                          <span className="text-sm text-gray-500 font-bold">/ {maxScore}</span>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={() => {
+                                            if (!canEdit) return;
+                                            const newCompleted = isCompleted
+                                              ? completedReqs.filter(r => r !== req)
+                                              : [...completedReqs, req];
+                                            handleUpdateScoutBadge(scout, badgeKey, {
+                                              completedRequirements: newCompleted
+                                            });
+                                          }}
+                                          disabled={!canEdit}
+                                          className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                                            isCompleted
+                                              ? 'bg-[#34A853] text-white shadow-sm'
+                                              : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                                          } ${!canEdit && 'opacity-50 cursor-not-allowed'}`}
+                                        >
+                                          <Check size={16} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
+                                        </button>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                                <td className="p-4 border-l border-gray-200">
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                      <div 
+                                        className="h-full bg-[#4285F4] rounded-full transition-all duration-500"
+                                        style={{ width: `${progress}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-sm font-bold text-gray-700 min-w-[3ch]">{Math.round(progress)}%</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-12 text-center text-gray-500 font-bold bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+              يرجى اختيار شارة من القائمة لعرض جدول التقييم
+            </div>
+          )}
+        </div>
       ) : (
         <>
           {/* Stats Summary */}
@@ -886,7 +1216,7 @@ enum OperationType {
                     const reqs = getScoutBadgeRequirements(b.name, s.stage);
                     const hasReqs = reqs.length > 0;
                     const completedReqs = (b.completedRequirements || []).filter(r => reqs.includes(r));
-                    const progress = hasReqs ? Math.round((completedReqs.length / reqs.length) * 100) : b.progress;
+                    const progress = hasReqs ? calculateBadgeProgress(b.name, reqs, completedReqs, b.requirementScores) : b.progress;
                     return progress > 0 && progress < 100;
                   }).length, 0)}
                 </h3>
@@ -1030,7 +1360,7 @@ enum OperationType {
                             const reqs = getScoutBadgeRequirements(b.name, scout.stage);
                             const hasReqs = reqs.length > 0;
                             const completedReqs = (b.completedRequirements || []).filter(r => reqs.includes(r));
-                            const progress = hasReqs ? Math.round((completedReqs.length / reqs.length) * 100) : b.progress;
+                            const progress = hasReqs ? calculateBadgeProgress(b.name, reqs, completedReqs, b.requirementScores) : b.progress;
                             
                             return (
                             <div key={i} className="flex items-center gap-2">
@@ -1303,7 +1633,7 @@ enum OperationType {
                           </h4>
                         </div>
 
-                        {canEdit && (
+                        {canManageAllBadges && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {key === 'badge1' ? (
                               <div className="col-span-2">
@@ -1316,7 +1646,7 @@ enum OperationType {
                                       ...prev,
                                       badges: {
                                         ...prev.badges,
-                                        [key]: { name: newName, progress: 0, notes: '', completedRequirements: [] }
+                                        [key]: { name: newName, progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
                                       }
                                     } : null);
                                   }}
@@ -1350,7 +1680,7 @@ enum OperationType {
                                         ...prev,
                                         badges: {
                                           ...prev.badges,
-                                          [key]: { name: newName, progress: 0, notes: '', completedRequirements: [] }
+                                          [key]: { name: newName, progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
                                         }
                                       } : null);
                                     }}
@@ -1374,7 +1704,7 @@ enum OperationType {
                               <div className="flex items-center gap-3">
                                 {hasReqs ? (
                                   <div className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-center font-black text-[#4285F4] text-lg">
-                                    {Math.round((completedReqs.length / reqs.length) * 100)}%
+                                    {calculateBadgeProgress(badgeName, reqs, completedReqs, badge.requirementScores)}%
                                   </div>
                                 ) : (
                                   <>
@@ -1397,32 +1727,62 @@ enum OperationType {
                               <div className="space-y-2 bg-white p-4 rounded-2xl border border-gray-100">
                                 <h5 className="text-sm font-bold text-gray-700 mb-3">متطلبات الشارة:</h5>
                                 {reqs.map((req, idx) => {
+                                  const maxScore = badgeSettings.requirementMaxScores?.[badge.name]?.[req] || 0;
                                   const isCompleted = completedReqs.includes(req);
+                                  const currentScore = badge.requirementScores?.[req] || 0;
+                                  
                                   return (
-                                    <label key={idx} className={`flex items-start gap-3 p-2 rounded-xl transition-colors ${canEdit ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-not-allowed'}`}>
-                                      <div className="relative flex items-center justify-center mt-0.5">
-                                        <input
-                                          type="checkbox"
-                                          disabled={!canEdit}
-                                          checked={isCompleted}
-                                          onChange={(e) => {
-                                            if (!canEdit) return;
-                                            let newCompleted = [...completedReqs];
-                                            if (e.target.checked) {
-                                              newCompleted.push(req);
-                                            } else {
-                                              newCompleted = newCompleted.filter(r => r !== req);
-                                            }
-                                            updateBadgeValue(key, 'completedRequirements', newCompleted);
-                                            updateBadgeValue(key, 'progress', Math.round((newCompleted.length / reqs.length) * 100));
-                                          }}
-                                          className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4] cursor-pointer"
-                                        />
-                                      </div>
-                                      <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
-                                        {req}
-                                      </span>
-                                    </label>
+                                    <div key={idx} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl transition-colors ${canEdit ? 'hover:bg-gray-50' : ''}`}>
+                                      {maxScore > 0 ? (
+                                        <>
+                                          <span className="text-sm font-bold text-gray-700 flex-1">{req}</span>
+                                          <div className="flex items-center gap-2 shrink-0 bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200">
+                                            <ScoreInput
+                                              maxScore={maxScore}
+                                              currentScore={currentScore}
+                                              canEdit={canEdit}
+                                              className="w-16 text-center bg-white border border-gray-300 rounded-md outline-none text-sm font-bold text-[#4285F4] disabled:bg-transparent disabled:border-transparent"
+                                              onSave={(numVal) => {
+                                                const newScores = { ...(badge.requirementScores || {}) };
+                                                if (numVal === undefined) {
+                                                  delete newScores[req];
+                                                } else {
+                                                  newScores[req] = numVal;
+                                                }
+                                                updateBadgeValue(key, 'requirementScores', newScores);
+                                                updateBadgeValue(key, 'progress', calculateBadgeProgress(badge.name, reqs, completedReqs, newScores));
+                                              }}
+                                            />
+                                            <span className="text-xs font-bold text-gray-500">من {maxScore}</span>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <label className={`flex items-start gap-3 w-full ${canEdit ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                                          <div className="relative flex items-center justify-center mt-0.5">
+                                            <input
+                                              type="checkbox"
+                                              disabled={!canEdit}
+                                              checked={isCompleted}
+                                              onChange={(e) => {
+                                                if (!canEdit) return;
+                                                let newCompleted = [...completedReqs];
+                                                if (e.target.checked) {
+                                                  newCompleted.push(req);
+                                                } else {
+                                                  newCompleted = newCompleted.filter(r => r !== req);
+                                                }
+                                                updateBadgeValue(key, 'completedRequirements', newCompleted);
+                                                updateBadgeValue(key, 'progress', calculateBadgeProgress(badge.name, reqs, newCompleted, badge.requirementScores));
+                                              }}
+                                              className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4] cursor-pointer"
+                                            />
+                                          </div>
+                                          <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                                            {req}
+                                          </span>
+                                        </label>
+                                      )}
+                                    </div>
                                   );
                                 })}
                               </div>

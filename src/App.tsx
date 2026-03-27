@@ -54,13 +54,7 @@ export default function App() {
         const data = snapshot.data() as ScoutProfile;
         setProfile(data);
         
-        // Auto-upgrade admin based on phone number
-        if (data.number === '01552698433' && data.role !== 'admin') {
-          updateDoc(doc(db, 'users', user.uid), { role: 'admin' }).catch(console.error);
-        }
-
-        // Auto-switch to dashboard for admins on first load if they want, 
-        // but let's keep it on profile by default or let them toggle.
+        // Super Admin status is checked in components
       } else {
         setProfile(null);
       }

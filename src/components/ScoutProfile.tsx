@@ -93,9 +93,24 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <BadgeProgressCard label="شارة 1" badge={profile.badges.badge1} requirements={getScoutBadgeRequirements(profile.badges.badge1.name, profile.stage)} />
-          <BadgeProgressCard label="شارة 2" badge={profile.badges.badge2} requirements={getScoutBadgeRequirements(profile.badges.badge2.name, profile.stage)} />
-          <BadgeProgressCard label="شارة 3" badge={profile.badges.badge3} requirements={getScoutBadgeRequirements(profile.badges.badge3.name, profile.stage)} />
+          <BadgeProgressCard 
+            label="شارة 1" 
+            badge={profile.badges.badge1} 
+            requirements={getScoutBadgeRequirements(profile.badges.badge1.name, profile.stage)} 
+            requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge1.name] || {}}
+          />
+          <BadgeProgressCard 
+            label="شارة 2" 
+            badge={profile.badges.badge2} 
+            requirements={getScoutBadgeRequirements(profile.badges.badge2.name, profile.stage)} 
+            requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge2.name] || {}}
+          />
+          <BadgeProgressCard 
+            label="شارة 3" 
+            badge={profile.badges.badge3} 
+            requirements={getScoutBadgeRequirements(profile.badges.badge3.name, profile.stage)} 
+            requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge3.name] || {}}
+          />
         </div>
       </div>
     </div>

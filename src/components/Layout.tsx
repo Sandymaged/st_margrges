@@ -23,7 +23,7 @@ export default function Layout({ children, user, profile, view, setView, general
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUpdatingLogo, setIsUpdatingLogo] = useState(false);
 
-  const isSuperAdmin = profile?.number === '01552698433' || profile?.email === 'begolbahaa98@gmail.com' || profile?.permissions?.canManagePermissions;
+  const isSuperAdmin = profile?.number === '01555165366' || profile?.email === 'begolbahaa98@gmail.com' || profile?.permissions?.canManagePermissions;
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -181,7 +181,7 @@ export default function Layout({ children, user, profile, view, setView, general
                   </div>
 
                   <div className="p-2">
-                    {profile?.role === 'admin' && setView && (
+                    {(profile?.role === 'admin' || isSuperAdmin) && setView && (
                       <button 
                         onClick={() => {
                           setView('dashboard');

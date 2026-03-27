@@ -5,6 +5,7 @@ export interface BadgeProgress {
   progress: number; // 0 to 100
   notes: string;
   completedRequirements?: string[];
+  requirementScores?: Record<string, number>;
 }
 
 export interface AdminPermissions {
@@ -49,6 +50,7 @@ export interface BadgeCategory {
 export interface BadgeSettings {
   categories: BadgeCategory[];
   requirements: Record<string, Partial<Record<Stage | 'all', string[]>>>;
+  requirementMaxScores?: Record<string, Record<string, number>>;
 }
 
 export interface GeneralSettings {

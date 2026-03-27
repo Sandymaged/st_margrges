@@ -7,9 +7,10 @@ interface BadgeProgressCardProps {
   badge: BadgeProgress;
   label: string;
   requirements?: string[];
+  requirementMaxScores?: Record<string, number>;
 }
 
-export default function BadgeProgressCard({ badge, label, requirements = [] }: BadgeProgressCardProps) {
+export default function BadgeProgressCard({ badge, label, requirements = [], requirementMaxScores = {} }: BadgeProgressCardProps) {
   const hasReqs = requirements.length > 0;
   const completedReqs = (badge.completedRequirements || []).filter(r => requirements.includes(r));
   const progress = hasReqs ? Math.round((completedReqs.length / requirements.length) * 100) : badge.progress;
@@ -26,35 +27,49 @@ export default function BadgeProgressCard({ badge, label, requirements = [] }: B
             <h3 className="text-lg font-bold text-gray-800">{badge.name}</h3>
           </div>
         </div>
-        <div className="text-[#4285F4] font-bold text-lg">
-          {progress}%
-        </div>
+        {!hasReqs && (
+          <div className="text-[#4285F4] font-bold text-lg">
+            {progress}%
+          </div>
+        )}
       </div>
 
       {/* Progress Bar */}
-      <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden mb-4">
-        <motion.div 
-          initial={{ width: 0 }}
-          animate={{ width: `${progress}%` }}
-          transition={{ duration: 1, ease: "easeOut" }}
-          className="h-full bg-gradient-to-l from-[#4285F4] to-[#34A853] rounded-full"
-        />
-      </div>
+      {!hasReqs && (
+        <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden mb-4">
+          <motion.div 
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 1, ease: "easeOut" }}
+            className="h-full bg-gradient-to-l from-[#4285F4] to-[#34A853] rounded-full"
+          />
+        </div>
+      )}
 
       {/* Requirements Checklist */}
       {hasReqs && (
         <div className="mt-4 space-y-2">
           <h4 className="text-sm font-bold text-gray-700 mb-2">متطلبات الشارة:</h4>
           {requirements.map((req, idx) => {
+            const maxScore = requirementMaxScores[req] || 0;
+            const isGraded = maxScore > 0;
             const isCompleted = completedReqs.includes(req);
+            
             return (
               <div key={idx} className="flex items-start gap-2 p-2 bg-gray-50 rounded-lg border border-gray-100">
-                {isCompleted ? (
-                  <CheckCircle2 size={16} className="text-[#34A853] shrink-0 mt-0.5" />
-                ) : (
-                  <Circle size={16} className="text-gray-300 shrink-0 mt-0.5" />
+                {!isGraded && (
+                  isCompleted ? (
+                    <CheckCircle2 size={16} className="text-[#34A853] shrink-0 mt-0.5" />
+                  ) : (
+                    <Circle size={16} className="text-gray-300 shrink-0 mt-0.5" />
+                  )
                 )}
-                <span className={`text-sm ${isCompleted ? 'text-gray-500 line-through' : 'text-gray-700 font-medium'}`}>
+                {isGraded && (
+                  <div className="w-4 h-4 rounded-full bg-gray-200 shrink-0 mt-0.5 flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                  </div>
+                )}
+                <span className={`text-sm ${!isGraded && isCompleted ? 'text-gray-500 line-through' : 'text-gray-700 font-medium'}`}>
                   {req}
                 </span>
               </div>
