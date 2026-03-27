@@ -9,7 +9,8 @@ import {
   AdminPermissions, 
   BadgeCategory, 
   DEFAULT_CATEGORIES, 
-  BADGE_LABELS 
+  BADGE_LABELS,
+  BadgeProgress
 } from '../types';
 import { 
   Search, 
@@ -468,18 +469,16 @@ enum OperationType {
 
   const handleSetRequirementMaxScore = async (badgeName: string, req: string, maxScore: number) => {
     const updatedMaxScores = {
-      ...(badgeSettings.requirementMaxScores || {})
+      ...(badgeSettings.requirementMaxScores || {}),
+      [badgeName]: {
+        ...(badgeSettings.requirementMaxScores?.[badgeName] || {}),
+        [req]: maxScore
+      }
     };
-    
-    if (!updatedMaxScores[badgeName]) {
-      updatedMaxScores[badgeName] = {};
-    }
-    
-    updatedMaxScores[badgeName][req] = maxScore;
     
     try {
       await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirementMaxScores: updatedMaxScores });
-      setMessage({ type: 'success', text: 'تم تحديث تقييم البند بنجاح' });
+      setMessage({ type: 'success', text: 'تم تحديث الدرجة النهائية للبند بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
     }
@@ -889,17 +888,6 @@ enum OperationType {
                               <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
                                 <span className="font-bold text-gray-700 text-sm flex-1">{req}</span>
                                 <div className="flex items-center gap-2 shrink-0">
-                                  <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
-                                    <span className="text-xs font-bold text-gray-500">التقييم من:</span>
-                                    <input 
-                                      key={`${selectedBadgeForReq}-${req}-${badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}`}
-                                      type="number" 
-                                      min="0"
-                                      className="w-16 text-center bg-transparent border-none outline-none text-sm font-bold text-[#4285F4]"
-                                      defaultValue={badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}
-                                      onBlur={(e) => handleSetRequirementMaxScore(selectedBadgeForReq, req, parseInt(e.target.value) || 0)}
-                                    />
-                                  </div>
                                   <button 
                                     onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
                                     className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -927,17 +915,6 @@ enum OperationType {
                                 <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
                                   <span className="font-bold text-gray-700 text-sm flex-1">{req}</span>
                                   <div className="flex items-center gap-2 shrink-0">
-                                    <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
-                                      <span className="text-xs font-bold text-gray-500">التقييم من:</span>
-                                      <input 
-                                        key={`${selectedBadgeForReq}-${req}-${badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}`}
-                                        type="number" 
-                                        min="0"
-                                        className="w-16 text-center bg-transparent border-none outline-none text-sm font-bold text-[#4285F4]"
-                                        defaultValue={badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || 0}
-                                        onBlur={(e) => handleSetRequirementMaxScore(selectedBadgeForReq, req, parseInt(e.target.value) || 0)}
-                                      />
-                                    </div>
                                     <button 
                                       onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
                                       className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -1021,9 +998,9 @@ enum OperationType {
                 <option value="">اختر الشارة للتقييم</option>
                 {Array.from(new Set(scouts.flatMap(s => [s.badges.badge1.name, s.badges.badge2.name, s.badges.badge3.name])))
                   .filter(Boolean)
-                  .filter(badgeName => canManageAllBadges || currentProfile?.permissions?.managedBadges.includes(badgeName))
+                  .filter(badgeName => canManageAllBadges || currentProfile?.permissions?.managedBadges.includes(badgeName as string))
                   .map(badgeName => (
-                  <option key={badgeName} value={badgeName}>{badgeName}</option>
+                  <option key={badgeName as string} value={badgeName as string}>{badgeName as string}</option>
                 ))}
               </select>
             </div>
@@ -1031,13 +1008,31 @@ enum OperationType {
           
           {gradingSelectedBadge ? (
             <div className="space-y-8">
-              {['أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات'].map(stage => {
-                  const stageScouts = scouts.filter(s => {
+              {(() => {
+                const renderedStages = STAGES.map(stage => {
+                  const stageReqs = getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage);
+                  const stageScoutsWithBadge = scouts.filter(s => {
                     if (s.stage !== stage) return false;
-                    const hasBadge = s.badges.badge1.name === gradingSelectedBadge || 
-                                     s.badges.badge2.name === gradingSelectedBadge || 
-                                     s.badges.badge3.name === gradingSelectedBadge;
-                    if (!hasBadge) return false;
+                    return s.badges.badge1.name === gradingSelectedBadge || 
+                           s.badges.badge2.name === gradingSelectedBadge || 
+                           s.badges.badge3.name === gradingSelectedBadge;
+                  });
+
+                  // Show stage if it has scouts OR if it has requirements (for super admin to set scores)
+                  if (stageScoutsWithBadge.length === 0 && !(isSuperAdmin && stageReqs.length > 0)) return null;
+
+                  if (stageReqs.length === 0) {
+                    return (
+                      <div key={stage} className="space-y-4">
+                        <h3 className="text-xl font-bold text-[#4285F4]">{stage}</h3>
+                        <div className="p-8 bg-orange-50 border border-orange-100 rounded-2xl text-orange-700 text-center font-bold">
+                          لم يتم إضافة متطلبات لهذه الشارة في مرحلة ({stage}). يرجى إضافتها من تبويب الإعدادات أولاً لتتمكن من التقييم.
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const filteredScouts = stageScoutsWithBadge.filter(s => {
                     if (gradingSearchTerm) {
                       const search = gradingSearchTerm.toLowerCase().trim();
                       return s.name.toLowerCase().includes(search) || s.number.includes(search);
@@ -1045,39 +1040,66 @@ enum OperationType {
                     return true;
                   });
 
-                if (stageScouts.length === 0) return null;
+                  return (
+                    <div key={stage} className="space-y-4">
+                      <h3 className="text-xl font-bold text-[#4285F4]">{stage}</h3>
+                      <div className="overflow-x-auto border border-gray-200 rounded-2xl">
+                        <table className="w-full text-right border-collapse min-w-max">
+                          <thead>
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                              <th className="p-4 font-bold text-gray-600 w-64 sticky right-0 bg-gray-50 z-10 border-l border-gray-200">بيانات الكشاف</th>
+                              {stageReqs.map((req, idx) => {
+                                const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
+                                return (
+                                  <th key={idx} className="p-4 font-bold text-gray-600 min-w-[200px] border-l border-gray-200 last:border-l-0">
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-sm truncate" title={req}>{req}</span>
+                                      {maxScore && maxScore > 0 && (
+                                        <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full w-fit">
+                                          من {maxScore}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </th>
+                                );
+                              })}
+                              <th className="p-4 font-bold text-gray-600 w-32 border-l border-gray-200">النسبة</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {/* Final Score Row (Super Admin only) */}
+                            {isSuperAdmin && (
+                              <tr className="bg-blue-50/50 border-b border-blue-100">
+                                <td className="p-4 sticky right-0 bg-blue-50 z-10 border-l border-gray-200 font-black text-[#4285F4]">
+                                  الدرجة النهائية
+                                </td>
+                                {stageReqs.map((req, idx) => (
+                                  <td key={idx} className="p-4 border-l border-gray-200 last:border-l-0">
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        key={`${gradingSelectedBadge}-${req}-${badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req] || 0}`}
+                                        type="number" 
+                                        min="0"
+                                        className="w-20 px-3 py-2 bg-white border border-blue-200 rounded-xl focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold text-[#4285F4]"
+                                        defaultValue={badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req] || 0}
+                                        onBlur={(e) => handleSetRequirementMaxScore(gradingSelectedBadge, req, parseInt(e.target.value) || 0)}
+                                      />
+                                    </div>
+                                  </td>
+                                ))}
+                                <td className="p-4 border-l border-gray-200 font-bold text-[#4285F4]">100%</td>
+                              </tr>
+                            )}
 
-                const stageReqs = getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage);
-                if (stageReqs.length === 0) return null;
-
-                return (
-                  <div key={stage} className="space-y-4">
-                    <h3 className="text-xl font-bold text-[#4285F4]">{stage}</h3>
-                    <div className="overflow-x-auto border border-gray-200 rounded-2xl">
-                      <table className="w-full text-right border-collapse min-w-max">
-                        <thead>
-                          <tr className="bg-gray-50 border-b border-gray-200">
-                            <th className="p-4 font-bold text-gray-600 w-64 sticky right-0 bg-gray-50 z-10 border-l border-gray-200">بيانات الكشاف</th>
-                            {stageReqs.map((req, idx) => {
-                              const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
-                              return (
-                                <th key={idx} className="p-4 font-bold text-gray-600 min-w-[200px] border-l border-gray-200 last:border-l-0">
-                                  <div className="flex flex-col gap-1">
-                                    <span className="text-sm truncate" title={req}>{req}</span>
-                                    {maxScore && maxScore > 0 && (
-                                      <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full w-fit">
-                                        من {maxScore}
-                                      </span>
-                                    )}
-                                  </div>
-                                </th>
-                              );
-                            })}
-                            <th className="p-4 font-bold text-gray-600 w-32 border-l border-gray-200">النسبة</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {stageScouts.map(scout => {
+                            {filteredScouts.length === 0 ? (
+                              <tr>
+                                <td colSpan={stageReqs.length + 2} className="p-12 text-center text-gray-400 italic font-bold">
+                                  {gradingSearchTerm 
+                                    ? `لا يوجد كشافين يطابقون "${gradingSearchTerm}" في هذه المرحلة` 
+                                    : "لا يوجد كشافين مسجلين لهذه الشارة في هذه المرحلة"}
+                                </td>
+                              </tr>
+                            ) : filteredScouts.map(scout => {
                             const badgeKey = scout.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
                                            : scout.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
                                            : 'badge3';
@@ -1175,11 +1197,23 @@ enum OperationType {
                     </div>
                   </div>
                 );
-              })}
-            </div>
+              });
+
+              const hasAnyContent = renderedStages.some(s => s !== null);
+              return hasAnyContent ? renderedStages : (
+                <div className="p-12 text-center bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
+                  <p className="text-gray-500 font-bold">
+                    {gradingSearchTerm 
+                      ? `لم يتم العثور على كشافين يطابقون "${gradingSearchTerm}" لهذه الشارة` 
+                      : "لا يوجد كشافين مسجلين لهذه الشارة حالياً. تأكد من إضافة متطلبات الشارة في الإعدادات أولاً."}
+                  </p>
+                </div>
+              );
+            })()}
+          </div>
           ) : (
-            <div className="p-12 text-center text-gray-500 font-bold bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-              يرجى اختيار شارة من القائمة لعرض جدول التقييم
+            <div className="p-12 text-center bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
+              <p className="text-gray-500 font-bold">اختر شارة من القائمة أعلاه للبدء في التقييم</p>
             </div>
           )}
         </div>
