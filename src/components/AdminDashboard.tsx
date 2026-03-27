@@ -138,22 +138,45 @@ enum OperationType {
     return canDeleteAccounts;
   };
   
+  // Helper to normalize Arabic strings for comparison
+  const normalizeArabic = (str: string) => {
+    if (!str) return '';
+    return str
+      .replace(/[أإآا]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/ى/g, 'ي')
+      .trim();
+  };
+
   const canEditBadge = (scoutStage: Stage, badgeName: string) => {
     if (canManageAllBadges) return true;
     if (!currentProfile?.permissions) return false;
     
     const { managedStages, managedBadges } = currentProfile.permissions;
-    return managedStages.includes(scoutStage) && managedBadges.includes(badgeName);
+    // Allow if they manage the stage OR the specific badge
+    const managesStage = (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scoutStage || ''));
+    const managesBadge = (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(badgeName || ''));
+    
+    return managesStage || managesBadge;
   };
   
   const canEditScout = (scout: ScoutProfile) => {
     if (canManageAllBadges) return true;
     if (!currentProfile?.permissions) return false;
     
-    // They can edit the scout if they can edit at least one of their badges
-    return canEditBadge(scout.stage, scout.badges.badge1.name) ||
-           canEditBadge(scout.stage, scout.badges.badge2.name) ||
-           canEditBadge(scout.stage, scout.badges.badge3.name);
+    const { managedStages, managedBadges } = currentProfile.permissions;
+    
+    // 1. If they manage the stage, they can edit the scout
+    if (scout.stage && (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scout.stage))) return true;
+    
+    // 2. If they manage any of the scout's current badges
+    const scoutBadgeNames = [
+      scout.badges?.badge1?.name,
+      scout.badges?.badge2?.name,
+      scout.badges?.badge3?.name
+    ].filter(Boolean);
+    
+    return scoutBadgeNames.some(b => (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(b)));
   };
 
   useEffect(() => {
@@ -177,8 +200,8 @@ enum OperationType {
     const q = query(collection(db, 'users'));
     const unsubscribeUsers = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as ScoutProfile));
-      // If super admin, show all users including admins (so they can manage them if needed), otherwise just scouts
-      setScouts(data.filter(s => isSuperAdmin ? true : s.role === 'scout'));
+      // Store all users, we will filter in the UI
+      setScouts(data);
       setLoading(false);
     }, (error) => {
       console.error('Firestore error:', error);
@@ -211,14 +234,31 @@ enum OperationType {
   const filteredAndSortedScouts = useMemo(() => {
     return scouts
       .filter(s => {
+        // If not super admin, hide other admins and only show scouts they have permission to see
+        if (!isSuperAdmin) {
+          if (s.role === 'admin' && s.uid !== currentProfile?.uid) return false;
+          // If it's a scout, check if they manage the stage or if they can edit at least one of their badges
+          if (s.role !== 'admin' && !canEditScout(s)) return false;
+        }
+
         const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                              s.number.includes(searchTerm);
         const matchesStage = !stageFilter || s.stage === stageFilter;
+        
+        // Category Filter
+        let matchesCategory = true;
+        if (categoryFilter) {
+          const availableBadgesInCategory = getAvailableBadges(categoryFilter, s.stage);
+          matchesCategory = availableBadgesInCategory.includes(s.badges.badge1.name) ||
+                            availableBadgesInCategory.includes(s.badges.badge2.name) ||
+                            availableBadgesInCategory.includes(s.badges.badge3.name);
+        }
+
         const matchesBadge = !badgeFilter || 
                             s.badges.badge1.name === badgeFilter || 
                             s.badges.badge2.name === badgeFilter || 
                             s.badges.badge3.name === badgeFilter;
-        return matchesSearch && matchesStage && matchesBadge;
+        return matchesSearch && matchesStage && matchesCategory && matchesBadge;
       })
       .sort((a, b) => {
         let comparison = 0;
@@ -231,20 +271,33 @@ enum OperationType {
         }
         return sortOrder === 'asc' ? comparison : -comparison;
       });
-  }, [scouts, searchTerm, stageFilter, badgeFilter, sortField, sortOrder]);
+  }, [scouts, searchTerm, stageFilter, categoryFilter, badgeFilter, sortField, sortOrder, currentProfile, isSuperAdmin]);
 
   // Helper to get badges for a category and stage
-  const getAvailableBadges = (categoryId: string, scoutStage: Stage) => {
+  const getAvailableBadges = (categoryId: string, scoutStage?: Stage | '') => {
     const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
     if (!category) return [];
     
-    // If there are stage-specific badges, use them
-    if (category.stageBadges && category.stageBadges[scoutStage]) {
-      return category.stageBadges[scoutStage] || [];
+    if (scoutStage) {
+      // If there are stage-specific badges, use them
+      const stageKey = Object.keys(category.stageBadges || {}).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
+      if (stageKey && category.stageBadges && category.stageBadges[stageKey as Stage]) {
+        return category.stageBadges[stageKey as Stage] || [];
+      }
+      // Otherwise return all badges in category
+      return category.badges || [];
     }
-    
-    // Otherwise return all badges in category
-    return category.badges || [];
+
+    // If no stage provided, return all badges in this category across all stages
+    const allBadges = new Set(category.badges || []);
+    if (category.stageBadges) {
+      Object.values(category.stageBadges).forEach(badges => {
+        if (Array.isArray(badges)) {
+          badges.forEach(b => allBadges.add(b));
+        }
+      });
+    }
+    return Array.from(allBadges);
   };
 
   const handleUpdateScout = async (e: React.FormEvent) => {
@@ -996,9 +1049,41 @@ enum OperationType {
                 className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700"
               >
                 <option value="">اختر الشارة للتقييم</option>
-                {Array.from(new Set(scouts.flatMap(s => [s.badges.badge1.name, s.badges.badge2.name, s.badges.badge3.name])))
+                {Array.from(new Set([
+                  ...scouts.flatMap(s => [s.badges.badge1.name, s.badges.badge2.name, s.badges.badge3.name]),
+                  ...(badgeSettings.categories || []).flatMap(c => [
+                    ...(c.badges || []),
+                    ...Object.values(c.stageBadges || {}).flat()
+                  ])
+                ]))
                   .filter(Boolean)
-                  .filter(badgeName => canManageAllBadges || currentProfile?.permissions?.managedBadges.includes(badgeName as string))
+                  .filter(badgeName => {
+                    if (canManageAllBadges) return true;
+                    if (!currentProfile?.permissions) return false;
+                    const { managedBadges, managedStages } = currentProfile.permissions;
+                    
+                    // 1. Explicitly managed badges
+                    if ((managedBadges || []).includes(badgeName as string)) return true;
+                    
+                    // 2. Badges that belong to managed stages (from settings)
+                    const isBadgeInManagedStage = (badgeSettings.categories || []).some(cat => {
+                      // Check general badges
+                      if ((cat.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName as string))) {
+                        return (managedStages || []).length > 0;
+                      }
+                      // Check stage-specific badges
+                      return (managedStages || []).some(stage => 
+                        (cat.stageBadges?.[stage] || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName as string))
+                      );
+                    });
+                    
+                    if (isBadgeInManagedStage) return true;
+
+                    // 3. Badges that belong to managed stages (from scouts currently in the list)
+                    return scouts.some(s => (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(s.stage || '')) && 
+                      (s.badges.badge1.name === badgeName || s.badges.badge2.name === badgeName || s.badges.badge3.name === badgeName)
+                    );
+                  })
                   .map(badgeName => (
                   <option key={badgeName as string} value={badgeName as string}>{badgeName as string}</option>
                 ))}
@@ -1018,8 +1103,9 @@ enum OperationType {
                            s.badges.badge3.name === gradingSelectedBadge;
                   });
 
-                  // Show stage if it has scouts OR if it has requirements (for super admin to set scores)
-                  if (stageScoutsWithBadge.length === 0 && !(isSuperAdmin && stageReqs.length > 0)) return null;
+                  // Show stage if it has scouts OR if it has requirements (for super admin or stage admin to set scores)
+                  const canManageStage = isSuperAdmin || canManageAllBadges || (currentProfile?.permissions?.managedStages || []).includes(stage as Stage);
+                  if (stageScoutsWithBadge.length === 0 && !(canManageStage && stageReqs.length > 0)) return null;
 
                   if (stageReqs.length === 0) {
                     return (
@@ -1343,7 +1429,7 @@ enum OperationType {
                       disabled={!categoryFilter}
                     >
                       <option value="">كل الشارات</option>
-                      {categoryFilter && getAvailableBadges(categoryFilter, stageFilter as Stage || STAGES[0]).map(b => (
+                      {categoryFilter && getAvailableBadges(categoryFilter, stageFilter as Stage || '').map(b => (
                         <option key={b} value={b}>{b}</option>
                       ))}
                     </select>
@@ -1492,7 +1578,11 @@ enum OperationType {
             </div>
             {filteredAndSortedScouts.length === 0 && (
               <div className="p-12 text-center text-gray-400 font-bold">
-                لا توجد نتائج تطابق بحثك
+                {searchTerm || stageFilter || categoryFilter || badgeFilter 
+                  ? "لا توجد نتائج تطابق بحثك" 
+                  : !isSuperAdmin 
+                    ? "لا يوجد كشافين متاحين للعرض بناءً على صلاحياتك الحالية للمرحلة أو الشارات المحددة" 
+                    : "لا يوجد كشافين مسجلين حالياً"}
               </div>
             )}
           </div>
