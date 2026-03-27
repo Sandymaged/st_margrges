@@ -1067,8 +1067,8 @@ enum OperationType {
                             </tr>
                           </thead>
                           <tbody>
-                            {/* Final Score Row (Super Admin only) */}
-                            {isSuperAdmin && (
+                            {/* Final Score Row (Super Admin and Manage All Badges only) */}
+                            {(isSuperAdmin || canManageAllBadges) && (
                               <tr className="bg-blue-50/50 border-b border-blue-100">
                                 <td className="p-4 sticky right-0 bg-blue-50 z-10 border-l border-gray-200 font-black text-[#4285F4]">
                                   الدرجة النهائية
