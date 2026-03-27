@@ -51,6 +51,11 @@ export interface BadgeSettings {
   requirements: Record<string, Partial<Record<Stage | 'all', string[]>>>;
 }
 
+export interface GeneralSettings {
+  logoUrl: string;
+  scoutGroupName: string;
+}
+
 export const DEFAULT_CATEGORIES: BadgeCategory[] = [
   {
     id: 'scout',

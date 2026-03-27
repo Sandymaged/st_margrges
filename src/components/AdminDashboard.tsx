@@ -27,6 +27,7 @@ import {
   Settings,
   Plus,
   Trash2,
+  Check,
   ShieldAlert,
   ShieldCheck,
   ShieldPlus,
@@ -89,6 +90,8 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     'كشاف ومرشدات': '',
     'متقدم ورائدات': ''
   });
+  const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
+  const [renamingCategoryName, setRenamingCategoryName] = useState('');
 
 enum OperationType {
   GET = 'get',
@@ -300,6 +303,24 @@ enum OperationType {
     try {
       await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, categories: updatedCategories });
       setMessage({ type: 'success', text: 'تم حذف التصنيف بنجاح' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+    }
+  };
+
+  const handleRenameCategory = async (categoryId: string) => {
+    if (!renamingCategoryName.trim()) return;
+    const updatedCategories = (badgeSettings.categories || []).map(c => {
+      if (c.id === categoryId) {
+        return { ...c, name: renamingCategoryName.trim() };
+      }
+      return c;
+    });
+    try {
+      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, categories: updatedCategories });
+      setRenamingCategoryId(null);
+      setRenamingCategoryName('');
+      setMessage({ type: 'success', text: 'تم إعادة تسمية التصنيف بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
     }
@@ -569,14 +590,55 @@ enum OperationType {
                 {(badgeSettings.categories || []).map((category) => (
                   <div key={category.id} className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col h-full">
                     <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200">
-                      <h3 className="text-xl font-black text-[#4285F4]">{category.name}</h3>
-                      <button
-                        onClick={() => handleRemoveCategory(category.id)}
-                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        title="حذف التصنيف"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      {renamingCategoryId === category.id ? (
+                        <div className="flex-1 flex gap-2">
+                          <input
+                            type="text"
+                            value={renamingCategoryName}
+                            onChange={(e) => setRenamingCategoryName(e.target.value)}
+                            className="flex-1 px-2 py-1 rounded-lg border border-gray-200 text-sm font-bold outline-none focus:ring-2 focus:ring-[#4285F4]"
+                            autoFocus
+                            onKeyPress={(e) => e.key === 'Enter' && handleRenameCategory(category.id)}
+                          />
+                          <button
+                            onClick={() => handleRenameCategory(category.id)}
+                            className="p-1 text-green-500 hover:bg-green-50 rounded-lg"
+                          >
+                            <Check size={16} />
+                          </button>
+                          <button
+                            onClick={() => setRenamingCategoryId(null)}
+                            className="p-1 text-gray-400 hover:bg-gray-50 rounded-lg"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <h3 className="text-xl font-black text-[#4285F4] truncate">{category.name}</h3>
+                          <div className="flex gap-1">
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => {
+                                  setRenamingCategoryId(category.id);
+                                  setRenamingCategoryName(category.name);
+                                }}
+                                className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="إعادة تسمية التصنيف"
+                              >
+                                <Edit2 size={18} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleRemoveCategory(category.id)}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="حذف التصنيف"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="flex-1 space-y-4 mb-6 overflow-y-auto max-h-[300px] pr-2">

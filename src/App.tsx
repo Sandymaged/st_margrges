@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { ScoutProfile } from './types';
+import { ScoutProfile, GeneralSettings } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
 import ScoutProfileView from './components/ScoutProfile';
@@ -17,9 +17,22 @@ import { motion, AnimatePresence } from 'motion/react';
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ScoutProfile | null>(null);
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
+    logoUrl: '/logo.png',
+    scoutGroupName: 'مجموعة مارجرجس الكشفية'
+  });
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<'profile' | 'dashboard'>('profile');
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (snapshot) => {
+      if (snapshot.exists()) {
+        setGeneralSettings(snapshot.data() as GeneralSettings);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -69,7 +82,7 @@ export default function App() {
           className="flex flex-col items-center gap-4"
         >
           <img 
-            src="/logo.png" 
+            src={generalSettings.logoUrl} 
             alt="Scouts Logo" 
             className="h-24 w-24 animate-pulse object-contain"
           />
@@ -80,7 +93,7 @@ export default function App() {
   }
 
   return (
-    <Layout user={user} profile={profile} view={view} setView={setView}>
+    <Layout user={user} profile={profile} view={view} setView={setView} generalSettings={generalSettings}>
       <AnimatePresence mode="wait">
         {!user ? (
           <motion.div

@@ -5,7 +5,7 @@ import {
   signInWithEmailAndPassword 
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
-import { STAGES, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage, DEFAULT_CATEGORIES } from '../types';
+import { STAGES, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage, DEFAULT_CATEGORIES, GeneralSettings } from '../types';
 import { 
   LogIn, 
   UserPlus, 
@@ -22,6 +22,10 @@ export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
+    logoUrl: '/logo.png',
+    scoutGroupName: 'مجموعة مارجرجس الكشفية'
+  });
 
   // Badge Settings
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
@@ -49,6 +53,15 @@ export default function Auth() {
           categories: data.categories || DEFAULT_CATEGORIES,
           requirements: data.requirements || {}
         });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
+      if (docSnap.exists()) {
+        setGeneralSettings(docSnap.data() as GeneralSettings);
       }
     });
     return () => unsubscribe();
@@ -146,7 +159,7 @@ export default function Auth() {
         <div className="text-center mb-8">
           <div className="h-20 w-20 mx-auto mb-4 bg-white rounded-full p-2 shadow-inner flex items-center justify-center overflow-hidden border border-gray-100">
             <img 
-              src="/logo.png" 
+              src={generalSettings.logoUrl} 
               alt="Scouts Logo" 
               className="h-full w-full object-contain"
             />
@@ -155,7 +168,7 @@ export default function Auth() {
             {isLogin ? 'تسجيل الدخول' : 'إنشاء حساب كشاف'}
           </h2>
           <p className="text-gray-500 mt-2">
-            {isLogin ? 'أهلاً بك مجدداً في مجموعة مارجرجس الكشفية' : 'سجل بياناتك للانضمام إلينا'}
+            {isLogin ? `أهلاً بك مجدداً في ${generalSettings.scoutGroupName}` : 'سجل بياناتك للانضمام إلينا'}
           </p>
         </div>
 

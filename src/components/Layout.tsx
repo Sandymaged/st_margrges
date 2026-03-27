@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { auth } from '../firebase';
 import { signOut } from 'firebase/auth';
-import { LogOut, User as UserIcon, Home, LayoutDashboard, Menu, X, ChevronDown } from 'lucide-react';
+import { LogOut, User as UserIcon, Home, LayoutDashboard, Menu, X, ChevronDown, Camera, Edit2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { GeneralSettings } from '../types';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -10,11 +13,42 @@ interface LayoutProps {
   profile: any;
   view?: 'profile' | 'dashboard';
   setView?: (view: 'profile' | 'dashboard') => void;
+  generalSettings: GeneralSettings;
 }
 
-export default function Layout({ children, user, profile, view, setView }: LayoutProps) {
+export default function Layout({ children, user, profile, view, setView, generalSettings }: LayoutProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [isUpdatingLogo, setIsUpdatingLogo] = useState(false);
+
+  const isSuperAdmin = profile?.number === '01552698433' || profile?.email === 'begolbahaa98@gmail.com' || profile?.permissions?.canManagePermissions;
+
+  const handleUpdateLogo = async () => {
+    const newUrl = window.prompt('أدخل رابط صورة اللوجو الجديد:', generalSettings.logoUrl);
+    if (newUrl && newUrl !== generalSettings.logoUrl) {
+      setIsUpdatingLogo(true);
+      try {
+        await updateDoc(doc(db, 'settings', 'general'), { logoUrl: newUrl });
+      } catch (error) {
+        console.error('Error updating logo:', error);
+        alert('حدث خطأ أثناء تحديث اللوجو');
+      } finally {
+        setIsUpdatingLogo(false);
+      }
+    }
+  };
+
+  const handleUpdateGroupName = async () => {
+    const newName = window.prompt('أدخل اسم المجموعة الجديد:', generalSettings.scoutGroupName);
+    if (newName && newName !== generalSettings.scoutGroupName) {
+      try {
+        await updateDoc(doc(db, 'settings', 'general'), { scoutGroupName: newName });
+      } catch (error) {
+        console.error('Error updating group name:', error);
+        alert('حدث خطأ أثناء تحديث اسم المجموعة');
+      }
+    }
+  };
 
   const handleLogout = () => {
     signOut(auth);
@@ -38,19 +72,41 @@ export default function Layout({ children, user, profile, view, setView }: Layou
       {/* Header */}
       <header className="bg-[#4285F4] text-white shadow-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <button 
-            onClick={() => setView && setView('profile')} 
-            className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-          >
-            <div className="h-10 w-10 bg-white rounded-full p-1 flex items-center justify-center shadow-inner overflow-hidden">
-              <img 
-                src="/logo.png" 
-                alt="Scouts Logo" 
-                className="h-full w-full object-contain"
-              />
+          <div className="flex items-center gap-3">
+            <div className="relative group">
+              <button 
+                onClick={() => setView && setView('profile')} 
+                className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+              >
+                <div className="h-10 w-10 bg-white rounded-full p-1 flex items-center justify-center shadow-inner overflow-hidden">
+                  <img 
+                    src={generalSettings.logoUrl} 
+                    alt="Scouts Logo" 
+                    className="h-full w-full object-contain"
+                  />
+                </div>
+                <h1 className="text-xl font-bold">{generalSettings.scoutGroupName}</h1>
+              </button>
+              {isSuperAdmin && (
+                <div className="absolute -bottom-2 -right-2 flex gap-1">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleUpdateLogo(); }}
+                    className="p-1 bg-white text-[#4285F4] rounded-full shadow-lg hover:bg-blue-50 transition-colors"
+                    title="تغيير اللوجو"
+                  >
+                    <Camera size={12} />
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleUpdateGroupName(); }}
+                    className="p-1 bg-white text-[#4285F4] rounded-full shadow-lg hover:bg-blue-50 transition-colors"
+                    title="تغيير اسم المجموعة"
+                  >
+                    <Edit2 size={12} />
+                  </button>
+                </div>
+              )}
             </div>
-            <h1 className="text-xl font-bold">مجموعة مارجرجس الكشفية</h1>
-          </button>
+          </div>
           
           <div className="flex items-center gap-4 relative" ref={menuRef}>
             {user && (
