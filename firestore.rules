@@ -30,17 +30,21 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "begolbahaa98@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() && (
+        request.auth.token.email == "begolbahaa98@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.number == '01552698433' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canManagePermissions', false) == true
+        ))
+      );
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'name', 'email', 'stage', 'number', 'badges', 'role', 'createdAt']) &&
+      return data.keys().hasAll(['uid', 'name', 'stage', 'number', 'badges', 'role', 'createdAt']) &&
         data.uid is string &&
         data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-        data.email is string &&
-        data.stage in ['أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات'] &&
+        data.stage in ['أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات', 'قادة وجوالة'] &&
         data.number is string && data.number.size() < 50 &&
         data.role in ['scout', 'admin'] &&
         data.badges is map &&
