@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { auth } from '../firebase';
 import { signOut } from 'firebase/auth';
-import { LogOut, User as UserIcon, Home, LayoutDashboard, Menu, X, ChevronDown, Camera, Edit2 } from 'lucide-react';
+import { LogOut, User as UserIcon, Home, LayoutDashboard, Menu, X, ChevronDown, Camera, Edit2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../firebase';
 import { GeneralSettings } from '../types';
 
 interface LayoutProps {
@@ -19,22 +20,38 @@ interface LayoutProps {
 export default function Layout({ children, user, profile, view, setView, generalSettings }: LayoutProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUpdatingLogo, setIsUpdatingLogo] = useState(false);
 
   const isSuperAdmin = profile?.number === '01552698433' || profile?.email === 'begolbahaa98@gmail.com' || profile?.permissions?.canManagePermissions;
 
-  const handleUpdateLogo = async () => {
-    const newUrl = window.prompt('أدخل رابط صورة اللوجو الجديد:', generalSettings.logoUrl);
-    if (newUrl && newUrl !== generalSettings.logoUrl) {
-      setIsUpdatingLogo(true);
-      try {
-        await updateDoc(doc(db, 'settings', 'general'), { logoUrl: newUrl });
-      } catch (error) {
-        console.error('Error updating logo:', error);
-        alert('حدث خطأ أثناء تحديث اللوجو');
-      } finally {
-        setIsUpdatingLogo(false);
-      }
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Basic validation
+    if (!file.type.startsWith('image/')) {
+      alert('يرجى اختيار ملف صورة');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert('حجم الصورة يجب أن يكون أقل من 2 ميجابايت');
+      return;
+    }
+
+    setIsUpdatingLogo(true);
+    try {
+      const storageRef = ref(storage, 'settings/logo');
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      await updateDoc(doc(db, 'settings', 'general'), { logoUrl: downloadUrl });
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      alert('حدث خطأ أثناء رفع اللوجو');
+    } finally {
+      setIsUpdatingLogo(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -89,12 +106,20 @@ export default function Layout({ children, user, profile, view, setView, general
               </button>
               {isSuperAdmin && (
                 <div className="absolute -bottom-2 -right-2 flex gap-1">
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                  />
                   <button 
-                    onClick={(e) => { e.stopPropagation(); handleUpdateLogo(); }}
-                    className="p-1 bg-white text-[#4285F4] rounded-full shadow-lg hover:bg-blue-50 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                    disabled={isUpdatingLogo}
+                    className="p-1 bg-white text-[#4285F4] rounded-full shadow-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
                     title="تغيير اللوجو"
                   >
-                    <Camera size={12} />
+                    {isUpdatingLogo ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleUpdateGroupName(); }}
