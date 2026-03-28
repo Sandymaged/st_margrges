@@ -1913,7 +1913,17 @@ enum OperationType {
                                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">اختر التصنيف:</label>
                                   <select
                                     value={selectedCategoryForBadgeSelection[key] || ''}
-                                    onChange={(e) => setSelectedCategoryForBadgeSelection(prev => ({ ...prev, [key]: e.target.value }))}
+                                    onChange={(e) => {
+                                      const newCategory = e.target.value;
+                                      setSelectedCategoryForBadgeSelection(prev => ({ ...prev, [key]: newCategory }));
+                                      setEditingScout(prev => prev ? {
+                                        ...prev,
+                                        badges: {
+                                          ...prev.badges,
+                                          [key]: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
+                                        }
+                                      } : null);
+                                    }}
                                     className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white"
                                   >
                                     <option value="">-- اختر تصنيف --</option>

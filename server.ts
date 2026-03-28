@@ -58,16 +58,29 @@ async function startServer() {
 
       if (uid) {
         await admin.auth().deleteUser(uid);
-        return res.json({ message: `Successfully deleted user ${uid} from Firebase Authentication.` });
+        await admin.firestore().collection('users').doc(uid).delete();
+        return res.json({ message: `Successfully deleted user ${uid} from Firebase Authentication and Firestore.` });
       } else if (phone) {
         const fakeEmail = `${phone}@scouts.local`;
         try {
           const userRecord = await admin.auth().getUserByEmail(fakeEmail);
           await admin.auth().deleteUser(userRecord.uid);
-          return res.json({ message: `Successfully deleted user with phone ${phone} from Firebase Authentication.` });
+          await admin.firestore().collection('users').doc(userRecord.uid).delete();
+          return res.json({ message: `Successfully deleted user with phone ${phone} from Firebase Authentication and Firestore.` });
         } catch (error: any) {
           if (error.code === 'auth/user-not-found') {
-            return res.status(404).json({ error: "User not found in Authentication." });
+            // Try to find and delete by phone number in Firestore if auth user not found
+            const usersRef = admin.firestore().collection('users');
+            const snapshot = await usersRef.where('number', '==', phone).get();
+            if (!snapshot.empty) {
+              const batch = admin.firestore().batch();
+              snapshot.docs.forEach(doc => {
+                batch.delete(doc.ref);
+              });
+              await batch.commit();
+              return res.json({ message: `User not found in Auth, but deleted from Firestore.` });
+            }
+            return res.status(404).json({ error: "User not found in Authentication or Firestore." });
           }
           throw error;
         }
