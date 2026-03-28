@@ -84,25 +84,26 @@ export default function Auth() {
   // Update badge selections when settings or stage/category change
   useEffect(() => {
     const badges1 = getAvailableBadges('scout', stage);
-    if (!badges1.includes(badge1) && badges1.length > 0) {
-      const available = badges1.find(b => b !== badge2 && b !== badge3);
-      setBadge1(available || badges1[0]);
+    if (!badges1.includes(badge1)) {
+      setBadge1("");
     }
     
     if (selectedCategory2) {
       const badges2 = getAvailableBadges(selectedCategory2, stage);
-      if (!badges2.includes(badge2) && badges2.length > 0) {
-        const available = badges2.find(b => b !== badge1 && b !== badge3);
-        setBadge2(available || badges2[0]);
+      if (!badges2.includes(badge2)) {
+        setBadge2("");
       }
+    } else {
+      setBadge2("");
     }
     
     if (selectedCategory3) {
       const badges3 = getAvailableBadges(selectedCategory3, stage);
-      if (!badges3.includes(badge3) && badges3.length > 0) {
-        const available = badges3.find(b => b !== badge1 && b !== badge2);
-        setBadge3(available || badges3[0]);
+      if (!badges3.includes(badge3)) {
+        setBadge3("");
       }
+    } else {
+      setBadge3("");
     }
   }, [badgeSettings, stage, selectedCategory2, selectedCategory3]);
 
