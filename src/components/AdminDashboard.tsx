@@ -597,7 +597,18 @@ enum OperationType {
         body: JSON.stringify({ phone: authPhoneToDelete, adminToken })
       });
 
-      const data = await response.json();
+      let data;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.error('Non-JSON response from server:', text);
+        throw new Error(text.includes('A server error occurred') 
+          ? 'خطأ في الخادم (Vercel). تأكد من صحة مفتاح Firebase Service Account في الإعدادات.'
+          : 'حدث خطأ غير متوقع في الخادم');
+      }
+
       if (!response.ok) {
         throw new Error(data.error || 'فشل حذف الحساب');
       }

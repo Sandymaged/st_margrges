@@ -4,10 +4,31 @@ import * as admin from 'firebase-admin';
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '{}');
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
+    let serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.FIREBASE_SERVICE_ACCOUNT;
+    
+    if (!serviceAccountRaw) {
+      console.error('FIREBASE_SERVICE_ACCOUNT_KEY not found in environment variables');
+    } else {
+      // Handle potential formatting issues (e.g. literal newlines)
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(serviceAccountRaw);
+      } catch (e) {
+        // Try to fix common JSON issues like unescaped newlines in private_key
+        try {
+          // If it's not valid JSON, maybe it's because of unescaped newlines
+          const fixed = serviceAccountRaw.replace(/\n/g, '\\n');
+          serviceAccount = JSON.parse(fixed);
+        } catch (e2) {
+          throw new Error('Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY. Ensure it is a valid JSON string.');
+        }
+      }
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log('Firebase Admin initialized successfully in Vercel function');
+    }
   } catch (error) {
     console.error('Firebase Admin initialization error:', error);
   }
@@ -50,10 +71,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Verify admin token
     const decodedToken = await admin.auth().verifyIdToken(adminToken);
     
-    // Check if user is admin in Firestore
-    const adminDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-    if (!adminDoc.exists || adminDoc.data()?.role !== 'admin') {
-      return res.status(403).json({ error: 'Forbidden: Admin access required.' });
+    // Check if the requester is the super admin
+    const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || 
+                         decodedToken.email === '01555165366@scouts.local' || 
+                         decodedToken.phone_number === '+201555165366';
+
+    if (!isSuperAdmin) {
+      // If not super admin, check if they are at least an admin in Firestore
+      const adminDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
+      if (!adminDoc.exists || adminDoc.data()?.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: Admin access required.' });
+      }
     }
 
     let userToDeleteUid = uid;

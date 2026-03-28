@@ -13,9 +13,21 @@ const __dirname = path.dirname(__filename);
 // Initialize Firebase Admin
 let adminApp: admin.app.App | null = null;
 try {
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (serviceAccount) {
-    const parsedAccount = JSON.parse(serviceAccount);
+  const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  if (serviceAccountRaw) {
+    let parsedAccount;
+    try {
+      parsedAccount = JSON.parse(serviceAccountRaw);
+    } catch (e) {
+      // Try to fix common JSON issues like unescaped newlines in private_key
+      try {
+        const fixed = serviceAccountRaw.replace(/\n/g, '\\n');
+        parsedAccount = JSON.parse(fixed);
+      } catch (e2) {
+        throw new Error('Failed to parse FIREBASE_SERVICE_ACCOUNT. Ensure it is a valid JSON string.');
+      }
+    }
+
     adminApp = admin.initializeApp({
       credential: admin.credential.cert(parsedAccount),
     });
