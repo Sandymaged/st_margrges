@@ -10,7 +10,8 @@ import {
   BadgeCategory, 
   DEFAULT_CATEGORIES, 
   BADGE_LABELS,
-  BadgeProgress
+  BadgeProgress,
+  PHONE_REGEX
 } from '../types';
 import { 
   Search, 
@@ -29,11 +30,13 @@ import {
   Plus,
   Trash2,
   Check,
+  Hash,
   ShieldAlert,
   ShieldCheck,
   ShieldPlus,
   ShieldX,
-  Calendar
+  Calendar,
+  UserX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ScoreInput from './ScoreInput';
@@ -55,7 +58,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   });
   const [selectedBadgeForReq, setSelectedBadgeForReq] = useState<string>('');
   const [newRequirementInput, setNewRequirementInput] = useState('');
-  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements'>('categories');
+  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup'>('categories');
   const [selectedCategoryForEdit, setSelectedCategoryForEdit] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
@@ -89,6 +92,8 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   });
   const [editLoading, setEditLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [isDeletingAuth, setIsDeletingAuth] = useState(false);
+  const [authPhoneToDelete, setAuthPhoneToDelete] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [newBadgeInputs, setNewBadgeInputs] = useState<Record<Stage, string>>({
     'أشبال وزهرات': '',
@@ -115,7 +120,10 @@ enum OperationType {
       canManageAllBadges: true,
       canDeleteAccounts: true,
       managedStages: [...STAGES],
-      managedBadges: (badgeSettings.categories || []).flatMap(c => c.badges)
+      managedBadges: Array.from(new Set((badgeSettings.categories || []).flatMap(c => [
+        ...(c.badges || []),
+        ...Object.values(c.stageBadges || {}).flat()
+      ])))
     });
   };
 
@@ -145,6 +153,8 @@ enum OperationType {
       .replace(/[أإآا]/g, 'ا')
       .replace(/ة/g, 'ه')
       .replace(/ى/g, 'ي')
+      .replace(/^شارة\s+/g, '')
+      .replace(/^الشارة\s+/g, '')
       .trim();
   };
 
@@ -153,11 +163,21 @@ enum OperationType {
     if (!currentProfile?.permissions) return false;
     
     const { managedStages, managedBadges } = currentProfile.permissions;
-    // Allow if they manage the stage OR the specific badge
-    const managesStage = (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scoutStage || ''));
-    const managesBadge = (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(badgeName || ''));
+    const hasManagedStages = (managedStages || []).length > 0;
+    const hasManagedBadges = (managedBadges || []).length > 0;
+
+    if (!hasManagedStages && !hasManagedBadges) return false;
+
+    const matchesStage = !hasManagedStages || (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scoutStage || ''));
+    const matchesBadge = !hasManagedBadges || (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(badgeName || ''));
     
-    return managesStage || managesBadge;
+    // If both are provided, they must both match (User's request for "registered for these same things")
+    if (hasManagedStages && hasManagedBadges) {
+      return matchesStage && matchesBadge;
+    }
+    
+    // If only one is provided, that one must match (the other is true by default)
+    return matchesStage && matchesBadge;
   };
   
   const canEditScout = (scout: ScoutProfile) => {
@@ -165,18 +185,27 @@ enum OperationType {
     if (!currentProfile?.permissions) return false;
     
     const { managedStages, managedBadges } = currentProfile.permissions;
+    const hasManagedStages = (managedStages || []).length > 0;
+    const hasManagedBadges = (managedBadges || []).length > 0;
+
+    if (!hasManagedStages && !hasManagedBadges) return false;
+
+    const matchesStage = !hasManagedStages || (scout.stage && (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scout.stage)));
     
-    // 1. If they manage the stage, they can edit the scout
-    if (scout.stage && (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scout.stage))) return true;
-    
-    // 2. If they manage any of the scout's current badges
     const scoutBadgeNames = [
       scout.badges?.badge1?.name,
       scout.badges?.badge2?.name,
       scout.badges?.badge3?.name
     ].filter(Boolean);
     
-    return scoutBadgeNames.some(b => (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(b)));
+    const matchesBadge = !hasManagedBadges || scoutBadgeNames.some(b => (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(b)));
+
+    // If both are provided, they must both match
+    if (hasManagedStages && hasManagedBadges) {
+      return matchesStage && matchesBadge;
+    }
+    
+    return matchesStage && matchesBadge;
   };
 
   useEffect(() => {
@@ -243,21 +272,21 @@ enum OperationType {
 
         const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                              s.number.includes(searchTerm);
-        const matchesStage = !stageFilter || s.stage === stageFilter;
+        const matchesStage = !stageFilter || normalizeArabic(s.stage) === normalizeArabic(stageFilter);
         
         // Category Filter
         let matchesCategory = true;
         if (categoryFilter) {
           const availableBadgesInCategory = getAvailableBadges(categoryFilter, s.stage);
-          matchesCategory = availableBadgesInCategory.includes(s.badges.badge1.name) ||
-                            availableBadgesInCategory.includes(s.badges.badge2.name) ||
-                            availableBadgesInCategory.includes(s.badges.badge3.name);
+          matchesCategory = availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges.badge1.name)) ||
+                            availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges.badge2.name)) ||
+                            availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges.badge3.name));
         }
 
         const matchesBadge = !badgeFilter || 
-                            s.badges.badge1.name === badgeFilter || 
-                            s.badges.badge2.name === badgeFilter || 
-                            s.badges.badge3.name === badgeFilter;
+                            normalizeArabic(s.badges.badge1.name) === normalizeArabic(badgeFilter) || 
+                            normalizeArabic(s.badges.badge2.name) === normalizeArabic(badgeFilter) || 
+                            normalizeArabic(s.badges.badge3.name) === normalizeArabic(badgeFilter);
         return matchesSearch && matchesStage && matchesCategory && matchesBadge;
       })
       .sort((a, b) => {
@@ -303,6 +332,15 @@ enum OperationType {
   const handleUpdateScout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingScout || !editForm) return;
+
+    const b1 = editingScout.badges.badge1.name;
+    const b2 = editingScout.badges.badge2.name;
+    const b3 = editingScout.badges.badge3.name;
+
+    if ((b1 && b2 && b1 === b2) || (b1 && b3 && b1 === b3) || (b2 && b3 && b2 === b3)) {
+      setMessage({ type: 'error', text: 'لا يمكن اختيار نفس الشارة أكثر من مرة' });
+      return;
+    }
 
     setEditLoading(true);
     try {
@@ -537,6 +575,43 @@ enum OperationType {
     }
   };
 
+  const handleForceDeleteAuth = async () => {
+    if (!authPhoneToDelete || !PHONE_REGEX.test(authPhoneToDelete)) {
+      setMessage({ type: 'error', text: 'يرجى إدخال رقم هاتف صحيح (11 رقم)' });
+      return;
+    }
+
+    if (!window.confirm(`هل أنت متأكد من حذف حساب رقم ${authPhoneToDelete} من نظام الدخول؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+      return;
+    }
+
+    setIsDeletingAuth(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('يجب تسجيل الدخول كمسؤول');
+
+      const adminToken = await user.getIdToken();
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: authPhoneToDelete, adminToken })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'فشل حذف الحساب');
+      }
+
+      setMessage({ type: 'success', text: 'تم حذف الحساب بنجاح من نظام الدخول. يمكنك الآن تسجيله مرة أخرى.' });
+      setAuthPhoneToDelete('');
+    } catch (error: any) {
+      console.error('Error force deleting auth:', error);
+      setMessage({ type: 'error', text: error.message || 'حدث خطأ أثناء حذف الحساب' });
+    } finally {
+      setIsDeletingAuth(false);
+    }
+  };
+
   const calculateBadgeProgress = (badgeName: string, reqs: string[], completedReqs: string[], requirementScores: Record<string, number> = {}) => {
     if (reqs.length === 0) return 0;
     
@@ -729,6 +804,14 @@ enum OperationType {
             >
               بنود الشارات
             </button>
+            {isSuperAdmin && (
+              <button
+                onClick={() => setSettingsTab('cleanup')}
+                className={`px-6 py-2 rounded-xl font-bold transition-all ${settingsTab === 'cleanup' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                إزالة الحسابات العالقة
+              </button>
+            )}
           </div>
 
           {settingsTab === 'categories' ? (
@@ -897,7 +980,7 @@ enum OperationType {
                 ))}
               </div>
             </div>
-          ) : (
+          ) : settingsTab === 'requirements' ? (
             <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">بنود ومتطلبات الشارات</h2>
@@ -1026,9 +1109,55 @@ enum OperationType {
                 </div>
               </div>
             </div>
-          )}
-        </div>
-      ) : activeTab === 'grading' ? (
+          ) : (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-800 mb-2">إدارة الحسابات العالقة</h2>
+                  <p className="text-gray-500 font-bold">استخدم هذا الخيار إذا كان الرقم مسجلاً بالفعل ولكن لا يظهر في القائمة (حساب محذوف جزئياً)</p>
+                </div>
+
+                <div className="bg-red-50 p-8 rounded-[2.5rem] border border-red-100">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="p-3 bg-red-100 rounded-2xl text-red-600 shadow-sm">
+                      <UserX size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-red-800">حذف نهائي من النظام</h3>
+                      <p className="text-sm text-red-600 font-bold opacity-80">سيتم حذف الحساب من نظام الدخول بالكامل، مما يتيح إعادة تسجيله.</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col md:flex-row gap-4">
+                    <div className="flex-1 relative">
+                      <Hash className="absolute right-4 top-1/2 -translate-y-1/2 text-red-300" size={20} />
+                      <input
+                        type="tel"
+                        value={authPhoneToDelete}
+                        onChange={(e) => setAuthPhoneToDelete(e.target.value)}
+                        placeholder="أدخل رقم الهاتف (11 رقم)"
+                        className="w-full pl-4 pr-12 py-4 rounded-2xl border border-red-200 outline-none focus:ring-4 focus:ring-red-500/10 focus:border-red-500 font-bold text-red-900 placeholder:text-red-200 transition-all"
+                        maxLength={11}
+                      />
+                    </div>
+                    <button
+                      onClick={handleForceDeleteAuth}
+                      disabled={isDeletingAuth || !authPhoneToDelete}
+                      className="px-8 py-4 bg-red-600 text-white font-black rounded-2xl hover:bg-red-700 transition-all disabled:opacity-50 flex items-center justify-center gap-3 shadow-lg shadow-red-200 active:scale-[0.98]"
+                    >
+                      {isDeletingAuth ? (
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/50 border-t-white" />
+                      ) : (
+                        <>
+                          <Trash2 size={20} />
+                          <span>حذف نهائي من النظام</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'grading' ? (
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
           <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center border-b border-gray-100 pb-6">
             <h2 className="text-2xl font-black text-gray-800">تقييم البنود</h2>
@@ -1063,7 +1192,7 @@ enum OperationType {
                     const { managedBadges, managedStages } = currentProfile.permissions;
                     
                     // 1. Explicitly managed badges
-                    if ((managedBadges || []).includes(badgeName as string)) return true;
+                    if ((managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(badgeName as string))) return true;
                     
                     // 2. Badges that belong to managed stages (from settings)
                     const isBadgeInManagedStage = (badgeSettings.categories || []).some(cat => {
@@ -1098,9 +1227,12 @@ enum OperationType {
                   const stageReqs = getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage);
                   const stageScoutsWithBadge = scouts.filter(s => {
                     if (s.stage !== stage) return false;
-                    return s.badges.badge1.name === gradingSelectedBadge || 
-                           s.badges.badge2.name === gradingSelectedBadge || 
-                           s.badges.badge3.name === gradingSelectedBadge;
+                    const normalizedBadge = normalizeArabic(gradingSelectedBadge);
+                    const hasBadge = normalizeArabic(s.badges.badge1.name) === normalizedBadge || 
+                                     normalizeArabic(s.badges.badge2.name) === normalizedBadge || 
+                                     normalizeArabic(s.badges.badge3.name) === normalizedBadge;
+                    if (!hasBadge) return false;
+                    return canEditBadge(s.stage, gradingSelectedBadge);
                   });
 
                   // Show stage if it has scouts OR if it has requirements (for super admin or stage admin to set scores)
@@ -1210,37 +1342,30 @@ enum OperationType {
 
                                   return (
                                     <td key={idx} className="p-4 border-l border-gray-200 last:border-l-0">
-                                      {maxScore && maxScore > 0 ? (
-                                        <div className="flex items-center gap-2">
-                                          <ScoreInput
-                                            maxScore={maxScore}
-                                            currentScore={currentScore}
-                                            canEdit={canEdit}
-                                            onSave={(numVal) => {
-                                              const newScores = { ...scores };
-                                              if (numVal === undefined) {
-                                                delete newScores[req];
-                                              } else {
-                                                newScores[req] = numVal;
-                                              }
-                                              
-                                              // Also update completion status if needed
-                                              let newCompleted = [...completedReqs];
-                                              if (numVal !== undefined && numVal > 0 && !isCompleted) {
-                                                newCompleted.push(req);
-                                              } else if ((numVal === undefined || numVal === 0) && isCompleted) {
-                                                newCompleted = newCompleted.filter(r => r !== req);
-                                              }
-
-                                              handleUpdateScoutBadge(scout, badgeKey, {
-                                                requirementScores: newScores,
-                                                completedRequirements: newCompleted
-                                              });
-                                            }}
-                                          />
-                                          <span className="text-sm text-gray-500 font-bold">/ {maxScore}</span>
-                                        </div>
-                                      ) : (
+                                      <div className="flex items-center gap-3">
+                                        {maxScore && maxScore > 0 && (
+                                          <div className="flex items-center gap-2">
+                                            <ScoreInput
+                                              maxScore={maxScore}
+                                              currentScore={currentScore}
+                                              canEdit={canEdit}
+                                              onSave={(numVal) => {
+                                                const newScores = { ...scores };
+                                                if (numVal === undefined) {
+                                                  delete newScores[req];
+                                                } else {
+                                                  newScores[req] = numVal;
+                                                }
+                                                
+                                                handleUpdateScoutBadge(scout, badgeKey, {
+                                                  requirementScores: newScores
+                                                });
+                                              }}
+                                            />
+                                            <span className="text-sm text-gray-500 font-bold">/ {maxScore}</span>
+                                          </div>
+                                        )}
+                                        
                                         <button
                                           onClick={() => {
                                             if (!canEdit) return;
@@ -1260,7 +1385,7 @@ enum OperationType {
                                         >
                                           <Check size={16} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
                                         </button>
-                                      )}
+                                      </div>
                                     </td>
                                   );
                                 })}
@@ -1505,30 +1630,30 @@ enum OperationType {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          {canEditScout(scout) && (
-                            <button
-                              onClick={() => {
-                                setEditingScout(scout);
-                                setEditForm({
-                                  name: scout.name,
-                                  number: scout.number,
-                                  stage: scout.stage
-                                });
-                              }}
-                              className="p-2 text-[#4285F4] hover:bg-[#4285F4]/10 rounded-xl transition-all"
-                              title="تعديل البيانات"
-                            >
-                              <Edit2 size={18} />
-                            </button>
-                          )}
                           {canDeleteThisScout(scout) && (
-                            <button
-                              onClick={() => setDeletingScout(scout)}
-                              className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                              title="حذف الحساب"
-                            >
-                              <Trash2 size={18} />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingScout(scout);
+                                  setEditForm({
+                                    name: scout.name,
+                                    number: scout.number,
+                                    stage: scout.stage
+                                  });
+                                }}
+                                className="p-2 text-[#4285F4] hover:bg-[#4285F4]/10 rounded-xl transition-all"
+                                title="تعديل البيانات"
+                              >
+                                <Edit2 size={18} />
+                              </button>
+                              <button
+                                onClick={() => setDeletingScout(scout)}
+                                className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                title="حذف الحساب"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </>
                           )}
                           {isSuperAdmin && scout.uid !== currentProfile?.uid && (
                             <div className="flex items-center gap-1">
@@ -1757,7 +1882,7 @@ enum OperationType {
                           </h4>
                         </div>
 
-                        {canManageAllBadges && (
+                        {(canManageAllBadges || (currentProfile?.permissions?.managedBadges?.length || 0) > 0 || (currentProfile?.permissions?.managedStages?.length || 0) > 0) && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {key === 'badge1' ? (
                               <div className="col-span-2">
@@ -1777,7 +1902,9 @@ enum OperationType {
                                   className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white"
                                 >
                                   <option value="">-- اختر شارة --</option>
-                                  {getAvailableBadges('scout', editingScout.stage).map(b => <option key={b} value={b}>{b}</option>)}
+                                  {getAvailableBadges('scout', editingScout.stage)
+                                    .filter(b => canManageAllBadges || canEditBadge(editingScout.stage, b))
+                                    .map(b => <option key={b} value={b} disabled={b === editingScout.badges.badge2.name || b === editingScout.badges.badge3.name}>{b}</option>)}
                                 </select>
                               </div>
                             ) : (
@@ -1790,7 +1917,13 @@ enum OperationType {
                                     className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white"
                                   >
                                     <option value="">-- اختر تصنيف --</option>
-                                    {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    {(badgeSettings.categories || [])
+                                      .filter(c => {
+                                        if (canManageAllBadges) return true;
+                                        const catBadges = [...(c.badges || []), ...Object.values(c.stageBadges || {}).flat()];
+                                        return catBadges.some(b => canEditBadge(editingScout.stage, b));
+                                      })
+                                      .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                   </select>
                                 </div>
                                 <div>
@@ -1811,9 +1944,11 @@ enum OperationType {
                                     className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white disabled:bg-gray-50"
                                   >
                                     <option value="">-- اختر شارة --</option>
-                                    {selectedCategoryForBadgeSelection[key] && getAvailableBadges(selectedCategoryForBadgeSelection[key]!, editingScout.stage).map(b => (
-                                      <option key={b} value={b}>{b}</option>
-                                    ))}
+                                    {selectedCategoryForBadgeSelection[key] && getAvailableBadges(selectedCategoryForBadgeSelection[key]!, editingScout.stage)
+                                      .filter(b => canManageAllBadges || canEditBadge(editingScout.stage, b))
+                                      .map(b => (
+                                        <option key={b} value={b} disabled={b === editingScout.badges[key === 'badge2' ? 'badge1' : 'badge1'].name || b === editingScout.badges[key === 'badge2' ? 'badge3' : 'badge2'].name}>{b}</option>
+                                      ))}
                                   </select>
                                 </div>
                               </>
@@ -2072,7 +2207,10 @@ enum OperationType {
                       <div>
                         <label className="block text-sm font-bold text-gray-700 mb-2">الشارات المسموح بتعديلها:</label>
                         <div className="flex flex-wrap gap-2">
-                          {(badgeSettings.categories || []).flatMap(c => c.badges).map(badge => (
+                          {Array.from(new Set((badgeSettings.categories || []).flatMap(c => [
+                            ...(c.badges || []),
+                            ...Object.values(c.stageBadges || {}).flat()
+                          ]))).map(badge => (
                             <label key={badge} className={`flex items-center gap-2 px-4 py-2 rounded-xl border cursor-pointer transition-colors ${permissionsForm.managedBadges.includes(badge) ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-white hover:bg-gray-50'}`}>
                               <input
                                 type="checkbox"

@@ -107,6 +107,14 @@ export default function Auth() {
         throw new Error('رقم الهاتف يجب أن يكون 11 رقماً ويبدأ بـ 010 أو 011 أو 012 أو 015');
       }
 
+      if (!isLogin) {
+        if ((badge1 && badge2 && badge1 === badge2) || 
+            (badge1 && badge3 && badge1 === badge3) || 
+            (badge2 && badge3 && badge2 === badge3)) {
+          throw new Error('لا يمكن اختيار نفس الشارة أكثر من مرة');
+        }
+      }
+
       const fakeEmail = `${phone}@scouts.local`;
 
       if (isLogin) {
@@ -256,7 +264,7 @@ export default function Auth() {
                           required
                         >
                           <option value="">-- اختر شارة --</option>
-                          {getAvailableBadges('scout', stage).map(b => <option key={b} value={b}>{b}</option>)}
+                          {getAvailableBadges('scout', stage).map(b => <option key={b} value={b} disabled={b === badge2 || b === badge3}>{b}</option>)}
                         </select>
                       </div>
                     </div>
@@ -284,7 +292,7 @@ export default function Auth() {
                           disabled={!selectedCategory2}
                         >
                           <option value="">-- اختر شارة --</option>
-                          {selectedCategory2 && getAvailableBadges(selectedCategory2, stage).map(b => <option key={b} value={b}>{b}</option>)}
+                          {selectedCategory2 && getAvailableBadges(selectedCategory2, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge3}>{b}</option>)}
                         </select>
                       </div>
                     </div>
@@ -312,7 +320,7 @@ export default function Auth() {
                           disabled={!selectedCategory3}
                         >
                           <option value="">-- اختر شارة --</option>
-                          {selectedCategory3 && getAvailableBadges(selectedCategory3, stage).map(b => <option key={b} value={b}>{b}</option>)}
+                          {selectedCategory3 && getAvailableBadges(selectedCategory3, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge2}>{b}</option>)}
                         </select>
                       </div>
                     </div>

@@ -39,29 +39,39 @@ async function startServer() {
       return res.status(500).json({ error: "Firebase Admin not initialized." });
     }
 
-    const { uid, adminToken } = req.body;
+    const { uid, phone, adminToken } = req.body;
 
-    if (!uid) {
-      return res.status(400).json({ error: "UID is required." });
+    if (!uid && !phone) {
+      return res.status(400).json({ error: "UID or Phone is required." });
     }
 
     try {
       // Verify the requester is an admin
       const decodedToken = await admin.auth().verifyIdToken(adminToken);
-      const userRecord = await admin.auth().getUser(decodedToken.uid);
       
-      // Check if the requester is the super admin or has admin role in Firestore
-      // For simplicity and security, we check if they are the super admin by email or phone
+      // Check if the requester is the super admin
       const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || decodedToken.email === '01555165366@scouts.local' || decodedToken.phone_number === '+201555165366';
       
       if (!isSuperAdmin) {
-        // You could also check Firestore here, but for now we'll stick to super admin or custom claims if you had them
-        // Let's assume for now only super admin can call this via API for safety
         return res.status(403).json({ error: "Unauthorized. Only Super Admin can delete users from Auth." });
       }
 
-      await admin.auth().deleteUser(uid);
-      res.json({ message: `Successfully deleted user ${uid} from Firebase Authentication.` });
+      if (uid) {
+        await admin.auth().deleteUser(uid);
+        return res.json({ message: `Successfully deleted user ${uid} from Firebase Authentication.` });
+      } else if (phone) {
+        const fakeEmail = `${phone}@scouts.local`;
+        try {
+          const userRecord = await admin.auth().getUserByEmail(fakeEmail);
+          await admin.auth().deleteUser(userRecord.uid);
+          return res.json({ message: `Successfully deleted user with phone ${phone} from Firebase Authentication.` });
+        } catch (error: any) {
+          if (error.code === 'auth/user-not-found') {
+            return res.status(404).json({ error: "User not found in Authentication." });
+          }
+          throw error;
+        }
+      }
     } catch (error: any) {
       console.error("Error deleting user:", error);
       res.status(500).json({ error: error.message || "Failed to delete user." });
