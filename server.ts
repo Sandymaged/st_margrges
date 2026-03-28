@@ -45,10 +45,23 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Request logger for API
+  app.use("/api", (req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+  });
+
+  // Health check
+  app.get("/api/ping", (req, res) => {
+    res.json({ status: "pong", timestamp: new Date().toISOString() });
+  });
+
   // API Routes
-  app.post("/api/admin/delete-user", async (req, res) => {
+  app.post(["/api/admin/delete-user", "/api/admin/delete-user/"], async (req, res) => {
+    console.log("Received delete-user request:", req.body.phone || req.body.uid);
     if (!adminApp) {
-      return res.status(500).json({ error: "Firebase Admin not initialized." });
+      console.error("Admin SDK not initialized");
+      return res.status(500).json({ error: "Firebase Admin not initialized. Check server logs for details." });
     }
 
     const { uid, phone, adminToken } = req.body;
