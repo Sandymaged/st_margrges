@@ -53,6 +53,7 @@ export interface BadgeSettings {
   categories: BadgeCategory[];
   requirements: Record<string, Partial<Record<Stage | 'all', string[]>>>;
   requirementMaxScores?: Record<string, Record<string, number>>;
+  requirementCategories?: Record<string, Record<string, string>>;
 }
 
 export interface GeneralSettings {

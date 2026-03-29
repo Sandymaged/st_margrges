@@ -8,12 +8,12 @@ interface BadgeProgressCardProps {
   label: string;
   requirements?: string[];
   requirementMaxScores?: Record<string, number>;
+  requirementCategories?: Record<string, string>;
 }
 
-export default function BadgeProgressCard({ badge, label, requirements = [], requirementMaxScores = {} }: BadgeProgressCardProps) {
+export default function BadgeProgressCard({ badge, label, requirements = [], requirementMaxScores = {}, requirementCategories = {} }: BadgeProgressCardProps) {
   const hasReqs = requirements.length > 0;
   const completedReqs = (badge.completedRequirements || []).filter(r => requirements.includes(r));
-  const progress = hasReqs ? Math.round((completedReqs.length / requirements.length) * 100) : badge.progress;
 
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
@@ -27,51 +27,33 @@ export default function BadgeProgressCard({ badge, label, requirements = [], req
             <h3 className="text-lg font-bold text-gray-800">{badge.name}</h3>
           </div>
         </div>
-        {!hasReqs && (
-          <div className="text-[#4285F4] font-bold text-lg">
-            {progress}%
-          </div>
-        )}
       </div>
-
-      {/* Progress Bar */}
-      {!hasReqs && (
-        <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden mb-4">
-          <motion.div 
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 1, ease: "easeOut" }}
-            className="h-full bg-gradient-to-l from-[#4285F4] to-[#34A853] rounded-full"
-          />
-        </div>
-      )}
 
       {/* Requirements Checklist */}
       {hasReqs && (
         <div className="mt-4 space-y-2">
           <h4 className="text-sm font-bold text-gray-700 mb-2">متطلبات الشارة:</h4>
           {requirements.map((req, idx) => {
-            const maxScore = requirementMaxScores[req] || 0;
-            const isGraded = maxScore > 0;
             const isCompleted = completedReqs.includes(req);
             
             return (
-              <div key={idx} className="flex items-start gap-2 p-2 bg-gray-50 rounded-lg border border-gray-100">
-                {!isGraded && (
-                  isCompleted ? (
-                    <CheckCircle2 size={16} className="text-[#34A853] shrink-0 mt-0.5" />
-                  ) : (
-                    <Circle size={16} className="text-gray-300 shrink-0 mt-0.5" />
-                  )
+              <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                {isCompleted ? (
+                  <CheckCircle2 size={20} className="text-[#34A853] shrink-0 mt-0.5" />
+                ) : (
+                  <Circle size={20} className="text-gray-300 shrink-0 mt-0.5" />
                 )}
-                {isGraded && (
-                  <div className="w-4 h-4 rounded-full bg-gray-200 shrink-0 mt-0.5 flex items-center justify-center">
-                    <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                  </div>
-                )}
-                <span className={`text-sm ${!isGraded && isCompleted ? 'text-gray-500 line-through' : 'text-gray-700 font-medium'}`}>
-                  {req}
-                </span>
+                <div className="flex flex-col flex-1">
+                  <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                    {req}
+                    <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full mr-3 not-line-through inline-block">
+                      {requirementCategories[req] || 'عام'}
+                    </span>
+                  </span>
+                  <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                    {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
+                  </span>
+                </div>
               </div>
             );
           })}
