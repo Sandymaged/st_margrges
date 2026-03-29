@@ -468,8 +468,8 @@ enum OperationType {
     return Array.from(allBadges);
   };
 
-  const handleUpdateScout = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateScout = async (e?: React.FormEvent, closeAfterSave = true) => {
+    if (e) e.preventDefault();
     if (!editingScout || !editForm) return;
 
     const b1 = editingScout.badges.badge1.name;
@@ -492,8 +492,10 @@ enum OperationType {
 
       await updateDoc(doc(db, 'users', editingScout.uid), updates);
       setMessage({ type: 'success', text: 'تم تحديث البيانات بنجاح' });
-      setEditingScout(null);
-      setEditForm(null);
+      if (closeAfterSave) {
+        setEditingScout(null);
+        setEditForm(null);
+      }
     } catch (error) {
       handleFirestoreError(error, 'update', `users/${editingScout.uid}`);
     } finally {
@@ -757,7 +759,7 @@ enum OperationType {
         const text = await response.text();
         console.error('Non-JSON response from server:', text);
         throw new Error(text.includes('A server error occurred') 
-          ? 'خطأ في الخادم (Vercel). تأكد من صحة مفتاح Firebase Service Account في الإعدادات.'
+          ? 'خطأ في الخادم. تأكد من صحة مفتاح Firebase Service Account في الإعدادات.'
           : 'حدث خطأ غير متوقع في الخادم');
       }
 
@@ -1110,7 +1112,7 @@ enum OperationType {
                     <div className="flex-1 space-y-4 mb-6 overflow-y-auto max-h-[300px] pr-2">
                       {/* General Badges */}
                       <div>
-                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">شارات عامة (لكل المراحل)</h4>
+                        <h4 className="text-[10px] font-bold text-gray-400 uppercase mb-2">شارات عامة (لكل المراحل)</h4>
                         <div className="space-y-2">
                           {(category.badges || []).map((badge) => (
                             <div key={badge} className="flex items-center justify-between bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
@@ -1132,7 +1134,7 @@ enum OperationType {
                       {/* Stage Specific Badges */}
                       {STAGES.map(stage => (
                         <div key={stage}>
-                          <h4 className="text-[10px] font-bold text-[#4285F4] uppercase tracking-wider mb-2">شارات مرحلة: {stage}</h4>
+                          <h4 className="text-[10px] font-bold text-[#4285F4] uppercase mb-2">شارات مرحلة: {stage}</h4>
                           <div className="space-y-2">
                             {(category.stageBadges?.[stage] || []).map((badge) => (
                               <div key={badge} className="flex items-center justify-between bg-blue-50/30 p-3 rounded-xl border border-blue-100 shadow-sm">
@@ -1227,7 +1229,7 @@ enum OperationType {
                       <div className="space-y-6 mb-6">
                         {/* All Stages */}
                         <div>
-                          <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                          <h4 className="text-xs font-black text-gray-400 uppercase mb-3 flex items-center gap-2">
                             <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
                             لكل المراحل
                           </h4>
@@ -1236,7 +1238,7 @@ enum OperationType {
                               <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
                                 <span className="font-bold text-gray-700 text-sm flex-1">
                                   {req}
-                                  <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full mr-3">
+                                  <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full mr-3 inline-block leading-normal">
                                     {badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام'}
                                   </span>
                                 </span>
@@ -1259,7 +1261,7 @@ enum OperationType {
                         {/* Specific Stages */}
                         {STAGES.map(stage => (
                           <div key={stage}>
-                            <h4 className="text-xs font-black text-[#4285F4] uppercase tracking-wider mb-3 flex items-center gap-2">
+                            <h4 className="text-xs font-black text-[#4285F4] uppercase mb-3 flex items-center gap-2">
                               <div className="w-1.5 h-1.5 rounded-full bg-[#4285F4]" />
                               مرحلة: {stage}
                             </h4>
@@ -1268,7 +1270,7 @@ enum OperationType {
                                 <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
                                   <span className="font-bold text-gray-700 text-sm flex-1">
                                     {req}
-                                    <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full mr-3">
+                                    <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full mr-3 inline-block leading-normal">
                                       {badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام'}
                                     </span>
                                   </span>
@@ -1552,7 +1554,7 @@ enum OperationType {
                                     <div className="flex flex-col gap-1">
                                       <span className="text-sm truncate" title={req}>{req}</span>
                                       {maxScore && maxScore > 0 && (
-                                        <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full w-fit">
+                                        <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full w-fit inline-block leading-normal">
                                           من {maxScore}
                                         </span>
                                       )}
@@ -1647,25 +1649,37 @@ enum OperationType {
                                           </div>
                                         )}
                                         
-                                        <button
-                                          onClick={() => {
-                                            if (!canEdit) return;
-                                            const newCompleted = isCompleted
-                                              ? completedReqs.filter(r => r !== req)
-                                              : [...completedReqs, req];
-                                            handleUpdateScoutBadge(scout, badgeKey, {
-                                              completedRequirements: newCompleted
-                                            });
-                                          }}
-                                          disabled={!canEdit}
-                                          className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
-                                            isCompleted
-                                              ? 'bg-[#34A853] text-white shadow-sm'
-                                              : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                                          } ${!canEdit && 'opacity-50 cursor-not-allowed'}`}
-                                        >
-                                          <Check size={16} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
-                                        </button>
+                                        <div className="flex-1 flex justify-end items-center gap-2">
+                                          <button
+                                            onClick={() => {
+                                              if (!canEdit) return;
+                                              setMessage({ type: 'success', text: 'تم حفظ التعديلات بنجاح' });
+                                            }}
+                                            disabled={!canEdit}
+                                            className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition-colors leading-normal"
+                                          >
+                                            حفظ
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              if (!canEdit) return;
+                                              const newCompleted = isCompleted
+                                                ? completedReqs.filter(r => r !== req)
+                                                : [...completedReqs, req];
+                                              handleUpdateScoutBadge(scout, badgeKey, {
+                                                completedRequirements: newCompleted
+                                              });
+                                            }}
+                                            disabled={!canEdit}
+                                            className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                                              isCompleted
+                                                ? 'bg-[#34A853] text-white shadow-sm'
+                                                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                                            } ${!canEdit && 'opacity-50 cursor-not-allowed'}`}
+                                          >
+                                            <Check size={16} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
+                                          </button>
+                                        </div>
                                       </div>
                                     </td>
                                   );
@@ -2172,7 +2186,7 @@ enum OperationType {
                           <h4 className="text-lg font-black text-gray-800 flex items-center gap-3">
                             <Award size={22} className={canEdit ? "text-[#4285F4]" : "text-gray-400"} />
                             {BADGE_LABELS[key]}
-                            {!canEdit && <span className="text-xs font-normal text-red-500 bg-red-50 px-2 py-1 rounded-lg">لا تملك صلاحية التعديل</span>}
+                            {!canEdit && <span className="text-xs font-normal text-red-500 bg-red-50 px-3 py-1.5 rounded-lg leading-normal">لا تملك صلاحية التعديل</span>}
                           </h4>
                         </div>
 
@@ -2204,7 +2218,7 @@ enum OperationType {
                             ) : (
                               <>
                                 <div>
-                                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">اختر التصنيف:</label>
+                                  <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر التصنيف:</label>
                                   <select
                                     value={selectedCategoryForBadgeSelection[key] || ''}
                                     onChange={(e) => {
@@ -2231,7 +2245,7 @@ enum OperationType {
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">اختر الشارة:</label>
+                                  <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر الشارة:</label>
                                   <select
                                     disabled={!selectedCategoryForBadgeSelection[key]}
                                     value={badgeName}
@@ -2320,9 +2334,11 @@ enum OperationType {
                                           <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
                                             {req}
                                           </span>
-                                          <span className={`text-xs font-bold mt-1 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                                            {isCompleted ? 'تم التسليم' : 'تسليم'}
-                                          </span>
+                                          <div className="flex items-center gap-3 mt-1">
+                                            <span className={`text-xs font-bold ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                                              {isCompleted ? 'تم التسليم' : 'تسليم'}
+                                            </span>
+                                          </div>
                                         </div>
                                       </label>
                                       
@@ -2364,7 +2380,7 @@ enum OperationType {
                             )}
 
                             <div className="space-y-2 pt-4">
-                              <label className="text-xs font-black text-gray-500 mr-2 uppercase tracking-wider">ملاحظات المسؤول:</label>
+                              <label className="text-xs font-black text-gray-500 mr-2 uppercase">ملاحظات المسؤول:</label>
                               <textarea
                                 disabled={!canEdit}
                                 value={badge.notes}

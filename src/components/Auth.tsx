@@ -311,7 +311,7 @@ export default function Auth() {
                     {/* Badge 2 */}
                     <div className="space-y-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">تصنيف شارة 2</label>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">تصنيف شارة 2</label>
                         <select
                           value={selectedCategory2}
                           onChange={(e) => setSelectedCategory2(e.target.value)}
@@ -339,7 +339,7 @@ export default function Auth() {
                     {/* Badge 3 */}
                     <div className="space-y-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">تصنيف شارة 3</label>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">تصنيف شارة 3</label>
                         <select
                           value={selectedCategory3}
                           onChange={(e) => setSelectedCategory3(e.target.value)}

@@ -46,7 +46,7 @@ export default function BadgeProgressCard({ badge, label, requirements = [], req
                 <div className="flex flex-col flex-1">
                   <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
                     {req}
-                    <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-full mr-3 not-line-through inline-block">
+                    <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full mr-3 not-line-through inline-block leading-normal">
                       {requirementCategories[req] || 'عام'}
                     </span>
                   </span>

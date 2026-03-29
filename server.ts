@@ -81,35 +81,55 @@ async function startServer() {
         return res.status(403).json({ error: "Unauthorized. Only Super Admin can delete users from Auth." });
       }
 
+      let deletedFromAuth = false;
+      let deletedFromFirestore = false;
+
       if (uid) {
-        await admin.auth().deleteUser(uid);
-        await admin.firestore().collection('users').doc(uid).delete();
-        return res.json({ message: `Successfully deleted user ${uid} from Firebase Authentication and Firestore.` });
+        try {
+          await admin.auth().deleteUser(uid);
+          deletedFromAuth = true;
+        } catch (error: any) {
+          if (error.code !== 'auth/user-not-found') throw error;
+        }
+        
+        try {
+          await admin.firestore().collection('users').doc(uid).delete();
+          deletedFromFirestore = true;
+        } catch (error) {
+          console.error("Error deleting from Firestore by UID:", error);
+        }
       } else if (phone) {
         const fakeEmail = `${phone}@scouts.local`;
         try {
           const userRecord = await admin.auth().getUserByEmail(fakeEmail);
           await admin.auth().deleteUser(userRecord.uid);
+          deletedFromAuth = true;
+          
           await admin.firestore().collection('users').doc(userRecord.uid).delete();
-          return res.json({ message: `Successfully deleted user with phone ${phone} from Firebase Authentication and Firestore.` });
+          deletedFromFirestore = true;
         } catch (error: any) {
-          if (error.code === 'auth/user-not-found') {
-            // Try to find and delete by phone number in Firestore if auth user not found
-            const usersRef = admin.firestore().collection('users');
-            const snapshot = await usersRef.where('number', '==', phone).get();
-            if (!snapshot.empty) {
-              const batch = admin.firestore().batch();
-              snapshot.docs.forEach(doc => {
-                batch.delete(doc.ref);
-              });
-              await batch.commit();
-              return res.json({ message: `User not found in Auth, but deleted from Firestore.` });
-            }
-            return res.status(404).json({ error: "User not found in Authentication or Firestore." });
-          }
-          throw error;
+          if (error.code !== 'auth/user-not-found') throw error;
+        }
+
+        // Try to find and delete by phone number in Firestore if auth user not found or just to be sure
+        const usersRef = admin.firestore().collection('users');
+        const snapshot = await usersRef.where('number', '==', phone).get();
+        if (!snapshot.empty) {
+          const batch = admin.firestore().batch();
+          snapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+          deletedFromFirestore = true;
         }
       }
+
+      if (deletedFromAuth || deletedFromFirestore) {
+        return res.json({ message: `Successfully deleted user. Auth: ${deletedFromAuth}, Firestore: ${deletedFromFirestore}` });
+      } else {
+        return res.status(404).json({ error: "User not found in Authentication or Firestore." });
+      }
+
     } catch (error: any) {
       console.error("Error deleting user:", error);
       res.status(500).json({ error: error.message || "Failed to delete user." });
