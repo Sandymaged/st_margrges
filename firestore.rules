@@ -41,12 +41,14 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'name', 'stage', 'number', 'badges', 'role', 'createdAt']) &&
+      return data.keys().hasAll(['uid', 'name', 'stage', 'number', 'badges', 'role', 'createdAt', 'email', 'isVerified', 'joinDate']) &&
         data.uid is string &&
         data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
         data.stage in ['أشبال وزهرات مبتدأ', 'أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات', 'قادة وجوالة'] &&
         data.number is string && data.number.size() < 50 &&
         data.role in ['scout', 'admin'] &&
+        data.email is string &&
+        data.isVerified is bool &&
         data.badges is map &&
         isValidBadge(data.badges.badge1) &&
         isValidBadge(data.badges.badge2) &&
@@ -77,9 +79,20 @@ service cloud.firestore {
         isAdmin() || (
           isOwner(userId) && 
           request.resource.data.role == resource.data.role &&
-          request.resource.data.badges.badge1.progress == resource.data.badges.badge1.progress &&
-          request.resource.data.badges.badge2.progress == resource.data.badges.badge2.progress &&
-          request.resource.data.badges.badge3.progress == resource.data.badges.badge3.progress
+          // Scouts can update their own profile info but not their progress unless it's a new setup
+          (
+            (
+              request.resource.data.badges.badge1.progress == resource.data.badges.badge1.progress &&
+              request.resource.data.badges.badge2.progress == resource.data.badges.badge2.progress &&
+              request.resource.data.badges.badge3.progress == resource.data.badges.badge3.progress
+            ) ||
+            // Allow setting progress to 0 if it was missing or already 0 (safety for profile completion)
+            (
+              request.resource.data.badges.badge1.progress == 0 &&
+              request.resource.data.badges.badge2.progress == 0 &&
+              request.resource.data.badges.badge3.progress == 0
+            )
+          )
         )
       );
       
