@@ -1018,7 +1018,7 @@ enum OperationType {
             >
               بنود الشارات
             </button>
-            {isSuperAdmin && (
+            {canDeleteAccounts && (
               <button
                 onClick={() => setSettingsTab('cleanup')}
                 className={`px-6 py-2 rounded-xl font-bold transition-all ${settingsTab === 'cleanup' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}

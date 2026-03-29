@@ -77,8 +77,21 @@ async function startServer() {
       // Check if the requester is the super admin
       const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || decodedToken.email === '01555165366@scouts.local' || decodedToken.phone_number === '+201555165366';
       
-      if (!isSuperAdmin) {
-        return res.status(403).json({ error: "Unauthorized. Only Super Admin can delete users from Auth." });
+      let canDelete = isSuperAdmin;
+      
+      if (!canDelete) {
+        // Check Firestore permissions
+        const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
+        if (requesterDoc.exists) {
+          const data = requesterDoc.data();
+          if (data?.role === 'admin' && data?.permissions?.canDeleteAccounts) {
+            canDelete = true;
+          }
+        }
+      }
+      
+      if (!canDelete) {
+        return res.status(403).json({ error: "Unauthorized. Only authorized admins can delete users." });
       }
 
       let deletedFromAuth = false;

@@ -106,7 +106,7 @@ export default function App() {
             className="text-center p-12 bg-white rounded-3xl shadow-sm"
           >
             <h2 className="text-2xl font-bold text-gray-800 mb-4">لم يتم العثور على ملفك الشخصي</h2>
-            <p className="text-gray-600">يرجى التواصل مع المسؤول لتفعيل حسابك.</p>
+            <p className="text-gray-600">يرجى التواصل مع المسؤول لمراجعة حسابك.</p>
           </motion.div>
         ) : (
           <motion.div
