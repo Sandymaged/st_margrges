@@ -36,8 +36,10 @@ import {
   ShieldPlus,
   ShieldX,
   Calendar,
-  UserX
+  UserX,
+  Download
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import ScoreInput from './ScoreInput';
 
@@ -95,13 +97,9 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [isDeletingAuth, setIsDeletingAuth] = useState(false);
   const [authPhoneToDelete, setAuthPhoneToDelete] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [newBadgeInputs, setNewBadgeInputs] = useState<Record<Stage, string>>({
-    'أشبال وزهرات': '',
-    'كشاف ومرشدات': '',
-    'متقدم ورائدات': ''
-  });
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
   const [renamingCategoryName, setRenamingCategoryName] = useState('');
+  const [showPassedOnly, setShowPassedOnly] = useState(false);
 
 enum OperationType {
   GET = 'get',
@@ -260,6 +258,136 @@ enum OperationType {
     };
   }, [isSuperAdmin]);
 
+  const exportGradingToExcel = () => {
+    if (!gradingSelectedBadge) return;
+
+    const workbook = XLSX.utils.book_new();
+
+    STAGES.forEach(stage => {
+      const stageReqs = getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage);
+      const stageScouts = scouts.filter(s => {
+        if (s.stage !== stage) return false;
+        const normalizedBadge = normalizeArabic(gradingSelectedBadge);
+        const hasBadge = normalizeArabic(s.badges.badge1.name) === normalizedBadge || 
+                         normalizeArabic(s.badges.badge2.name) === normalizedBadge || 
+                         normalizeArabic(s.badges.badge3.name) === normalizedBadge;
+        if (!hasBadge) return false;
+
+        // Apply 50% filter if active
+        if (showPassedOnly) {
+          const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
+                         : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+                         : 'badge3';
+          if ((s.badges[badgeKey].progress || 0) < 50) return false;
+        }
+
+        return true;
+      });
+
+      if (stageScouts.length === 0) return;
+
+      const data = stageScouts.map(s => {
+        const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
+                       : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+                       : 'badge3';
+        const badge = s.badges[badgeKey];
+        const scores = badge.requirementScores || {};
+        
+        const row: any = {
+          'الاسم': s.name,
+          'رقم الهاتف': s.number,
+          'المرحلة': s.stage
+        };
+
+        stageReqs.forEach(req => {
+          row[req] = scores[req] || 0;
+        });
+
+        row['النسبة المئوية'] = `${Math.round(badge.progress || 0)}%`;
+        return row;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(workbook, worksheet, stage.substring(0, 31));
+    });
+
+    XLSX.writeFile(workbook, `تقييم_${gradingSelectedBadge}_${new Date().toLocaleDateString()}.xlsx`);
+  };
+
+  const importFromExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+        setLoading(true);
+        let updatedCount = 0;
+
+        for (const row of data) {
+          const number = String(row['رقم الهاتف'] || row['Number'] || '').trim();
+          if (!number) continue;
+
+          const scout = scouts.find(s => s.number === number);
+          if (!scout) continue;
+
+          const badgeKey = scout.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
+                         : scout.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+                         : scout.badges.badge3.name === gradingSelectedBadge ? 'badge3' : null;
+          
+          if (!badgeKey) continue;
+
+          const stageReqs = getScoutBadgeRequirements(gradingSelectedBadge, scout.stage);
+          const currentBadge = scout.badges[badgeKey];
+          const newScores = { ...(currentBadge.requirementScores || {}) };
+          const newCompletedReqs = [...(currentBadge.completedRequirements || [])];
+
+          let changed = false;
+          stageReqs.forEach(req => {
+            if (row[req] !== undefined) {
+              const val = parseFloat(row[req]);
+              const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req] || 0;
+              
+              if (!isNaN(val)) {
+                newScores[req] = Math.min(Math.max(0, val), maxScore);
+                changed = true;
+                
+                if (newScores[req] > 0 && !newCompletedReqs.includes(req)) {
+                  newCompletedReqs.push(req);
+                }
+              }
+            }
+          });
+
+          if (changed) {
+            const newProgress = calculateBadgeProgress(gradingSelectedBadge, stageReqs, newCompletedReqs, newScores);
+            await updateDoc(doc(db, 'users', scout.uid), {
+              [`badges.${badgeKey}.requirementScores`]: newScores,
+              [`badges.${badgeKey}.completedRequirements`]: newCompletedReqs,
+              [`badges.${badgeKey}.progress`]: newProgress
+            });
+            updatedCount++;
+          }
+        }
+
+        setMessage({ type: 'success', text: `تم تحديث بيانات ${updatedCount} كشاف بنجاح` });
+      } catch (error) {
+        console.error('Import error:', error);
+        setMessage({ type: 'error', text: 'حدث خطأ أثناء استيراد البيانات. تأكد من صحة تنسيق الملف.' });
+      } finally {
+        setLoading(false);
+        if (e.target) e.target.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const filteredAndSortedScouts = useMemo(() => {
     return scouts
       .filter(s => {
@@ -287,6 +415,7 @@ enum OperationType {
                             normalizeArabic(s.badges.badge1.name) === normalizeArabic(badgeFilter) || 
                             normalizeArabic(s.badges.badge2.name) === normalizeArabic(badgeFilter) || 
                             normalizeArabic(s.badges.badge3.name) === normalizeArabic(badgeFilter);
+
         return matchesSearch && matchesStage && matchesCategory && matchesBadge;
       })
       .sort((a, b) => {
@@ -1172,7 +1301,7 @@ enum OperationType {
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
           <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center border-b border-gray-100 pb-6">
             <h2 className="text-2xl font-black text-gray-800">تقييم البنود</h2>
-            <div className="flex gap-4 w-full md:w-auto">
+            <div className="flex flex-wrap gap-4 w-full md:w-auto">
               <div className="relative flex-1 md:w-64">
                 <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                 <input
@@ -1228,6 +1357,32 @@ enum OperationType {
                   <option key={badgeName as string} value={badgeName as string}>{badgeName as string}</option>
                 ))}
               </select>
+
+              {gradingSelectedBadge && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowPassedOnly(!showPassedOnly)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all font-bold text-sm ${showPassedOnly ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    title="عرض الناجحين فقط (50%+)"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span className="hidden lg:inline">ناجح (50%+)</span>
+                  </button>
+                  <button
+                    onClick={exportGradingToExcel}
+                    className="flex items-center gap-2 px-4 py-3 rounded-2xl border bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-all font-bold text-sm"
+                    title="تصدير للتقييم الحالي"
+                  >
+                    <Download size={16} />
+                    <span className="hidden lg:inline">تصدير Excel</span>
+                  </button>
+                  <label className="flex items-center gap-2 px-4 py-3 rounded-2xl border bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-all font-bold text-sm cursor-pointer">
+                    <Plus size={16} />
+                    <span className="hidden lg:inline">استيراد Excel</span>
+                    <input type="file" accept=".xlsx, .xls" onChange={importFromExcel} className="hidden" />
+                  </label>
+                </div>
+              )}
             </div>
           </div>
           
@@ -1262,6 +1417,14 @@ enum OperationType {
                   }
 
                   const filteredScouts = stageScoutsWithBadge.filter(s => {
+                    // Apply 50% filter if active
+                    if (showPassedOnly) {
+                      const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
+                                     : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+                                     : 'badge3';
+                      if ((s.badges[badgeKey].progress || 0) < 50) return false;
+                    }
+
                     if (gradingSearchTerm) {
                       const search = gradingSearchTerm.toLowerCase().trim();
                       return s.name.toLowerCase().includes(search) || s.number.includes(search);

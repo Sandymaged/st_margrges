@@ -1,4 +1,4 @@
-export type Stage = 'أشبال وزهرات' | 'كشاف ومرشدات' | 'متقدم ورائدات' | 'قادة وجوالة';
+export type Stage = 'أشبال وزهرات مبتدأ' | 'أشبال وزهرات' | 'كشاف ومرشدات' | 'متقدم ورائدات' | 'قادة وجوالة';
 
 export interface BadgeProgress {
   name: string;
@@ -34,6 +34,7 @@ export interface ScoutProfile {
 }
 
 export const STAGES: Stage[] = [
+  'أشبال وزهرات مبتدأ',
   'أشبال وزهرات',
   'كشاف ومرشدات',
   'متقدم ورائدات',

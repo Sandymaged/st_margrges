@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
 import { 
   createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword 
+  signInWithEmailAndPassword,
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { STAGES, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage, DEFAULT_CATEGORIES, GeneralSettings } from '../types';
 import { 
   LogIn, 
@@ -12,10 +12,9 @@ import {
   User as UserIcon, 
   Hash, 
   MapPin, 
-  Award, 
-  Mail, 
   Lock,
-  AlertCircle
+  AlertCircle,
+  MessageSquare
 } from 'lucide-react';
 
 export default function Auth() {
@@ -44,6 +43,10 @@ export default function Auth() {
   
   const [selectedCategory2, setSelectedCategory2] = useState('');
   const [selectedCategory3, setSelectedCategory3] = useState('');
+
+  // Verification State
+  const [showVerificationStep, setShowVerificationStep] = useState(false);
+  const [createdUid, setCreatedUid] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
@@ -117,23 +120,23 @@ export default function Auth() {
         throw new Error('رقم الهاتف يجب أن يكون 11 رقماً ويبدأ بـ 010 أو 011 أو 012 أو 015');
       }
 
-      if (!isLogin) {
-        if ((badge1 && badge2 && badge1 === badge2) || 
-            (badge1 && badge3 && badge1 === badge3) || 
-            (badge2 && badge3 && badge2 === badge3)) {
-          throw new Error('لا يمكن اختيار نفس الشارة أكثر من مرة');
-        }
-      }
-
       const fakeEmail = `${phone}@scouts.local`;
 
       if (isLogin) {
         await signInWithEmailAndPassword(auth, fakeEmail, password);
       } else {
+        // Sign Up Flow
+        if ((badge1 && badge2 && badge1 === badge2) || 
+            (badge1 && badge3 && badge1 === badge3) || 
+            (badge2 && badge3 && badge2 === badge3)) {
+          throw new Error('لا يمكن اختيار نفس الشارة أكثر من مرة');
+        }
+
+        // Create User in Auth
         const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
         const user = userCredential.user;
 
-        // Create profile immediately
+        // Create profile
         const profile: ScoutProfile = {
           uid: user.uid,
           name,
@@ -146,11 +149,14 @@ export default function Auth() {
             badge3: { name: badge3, progress: 0, notes: '', completedRequirements: [] },
           },
           role: 'scout',
+          isVerified: false, // Initially false
           createdAt: serverTimestamp(),
           joinDate: serverTimestamp(),
         };
 
         await setDoc(doc(db, 'users', user.uid), profile);
+        setCreatedUid(user.uid);
+        setShowVerificationStep(true);
       }
     } catch (err: any) {
       console.error('Auth error:', err);
@@ -158,8 +164,6 @@ export default function Auth() {
         setError('هذا الرقم مسجل بالفعل');
       } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
         setError('رقم الهاتف أو كلمة المرور غير صحيحة');
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setError('عذراً، تسجيل الدخول غير مفعل. يرجى تفعيله من لوحة تحكم Firebase (Authentication -> Sign-in method -> Email/Password).');
       } else {
         setError(err.message || 'حدث خطأ ما، يرجى المحاولة مرة أخرى');
       }
@@ -199,40 +203,67 @@ export default function Auth() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Common Fields */}
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
-                <Hash size={16} className="text-[#4285F4]" /> رقم الهاتف (11 رقم)
-              </label>
-              <input
-                required
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
-                placeholder="01xxxxxxxxx"
-                maxLength={11}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
-                <Lock size={16} className="text-[#4285F4]" /> كلمة المرور
-              </label>
-              <input
-                required
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
-                placeholder="••••••••"
-                minLength={6}
-              />
-            </div>
-
-            {!isLogin && (
+            {isLogin ? (
               <>
-                {/* Signup Only Fields */}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
+                    <Hash size={16} className="text-[#4285F4]" /> رقم الهاتف (11 رقم)
+                  </label>
+                  <input
+                    required
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
+                    placeholder="01xxxxxxxxx"
+                    maxLength={11}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
+                    <Lock size={16} className="text-[#4285F4]" /> كلمة المرور
+                  </label>
+                  <input
+                    required
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
+                    placeholder="••••••••"
+                    minLength={6}
+                  />
+                </div>
+              </>
+            ) : showVerificationStep ? (
+              <div className="md:col-span-2 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100 text-center">
+                  <p className="text-blue-800 font-bold mb-2">تم إنشاء الحساب بنجاح!</p>
+                  <p className="text-sm text-blue-600">
+                    يرجى تفعيل حسابك عن طريق إرسال رسالة للمسؤول عبر الواتساب.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const adminNumber = '01555165366';
+                    const message = `VERIFY_USER_PHONE_${phone}`;
+                    window.open(`https://wa.me/2${adminNumber}?text=${encodeURIComponent(message)}`, '_blank');
+                  }}
+                  className="w-full flex items-center justify-center gap-3 bg-[#25D366] hover:bg-[#128C7E] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98]"
+                >
+                  <MessageSquare size={20} />
+                  <span>تفعيل عبر واتساب</span>
+                </button>
+
+                <p className="text-center text-xs text-gray-500">
+                  بعد إرسال الرسالة، سيقوم المسؤول بمراجعة حسابك وتفعيله في أقرب وقت.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Signup Fields */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
                     <UserIcon size={16} className="text-[#4285F4]" /> الاسم بالكامل
@@ -244,6 +275,36 @@ export default function Auth() {
                     onChange={(e) => setName(e.target.value)}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
                     placeholder="أدخل اسمك"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
+                    <Hash size={16} className="text-[#4285F4]" /> رقم الهاتف (11 رقم)
+                  </label>
+                  <input
+                    required
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
+                    placeholder="01xxxxxxxxx"
+                    maxLength={11}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
+                    <Lock size={16} className="text-[#4285F4]" /> كلمة المرور
+                  </label>
+                  <input
+                    required
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
+                    placeholder="••••••••"
+                    minLength={6}
                   />
                 </div>
 
@@ -341,20 +402,22 @@ export default function Auth() {
           </div>
 
           <div className="space-y-4">
-            <button
-              disabled={loading || (!isLogin && (!badge1 || !badge2 || !badge3))}
-              type="submit"
-              className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
-            >
-              {loading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/50 border-t-white" />
-              ) : (
-                <>
-                  {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
-                  <span>{isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
-                </>
-              )}
-            </button>
+            {!showVerificationStep && (
+              <button
+                disabled={loading || (!isLogin && (!badge1 || !badge2 || !badge3))}
+                type="submit"
+                className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
+              >
+                {loading ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/50 border-t-white" />
+                ) : (
+                  <>
+                    {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
+                    <span>{isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
+                  </>
+                )}
+              </button>
+            )}
 
             {isLogin && (
               <button

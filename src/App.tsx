@@ -108,6 +108,43 @@ export default function App() {
             <h2 className="text-2xl font-bold text-gray-800 mb-4">لم يتم العثور على ملفك الشخصي</h2>
             <p className="text-gray-600">يرجى التواصل مع المسؤول لتفعيل حسابك.</p>
           </motion.div>
+        ) : profile.isVerified === false ? (
+          <motion.div
+            key="pending-verification"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="max-w-md mx-auto text-center p-8 bg-white rounded-3xl shadow-xl border border-blue-100"
+          >
+            <div className="h-20 w-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <img 
+                src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" 
+                alt="WhatsApp" 
+                className="h-12 w-12"
+              />
+            </div>
+            <h2 className="text-2xl font-black text-gray-800 mb-4">حسابك قيد المراجعة</h2>
+            <p className="text-gray-600 mb-8 leading-relaxed">
+              شكراً لانضمامك إلينا! يرجى الضغط على الزر أدناه لإرسال رسالة التفعيل للمسؤول عبر واتساب.
+            </p>
+            
+            <button
+              onClick={() => {
+                const adminNumber = '01555165366';
+                const message = `VERIFY_USER_PHONE_${profile.number}`;
+                window.open(`https://wa.me/2${adminNumber}?text=${encodeURIComponent(message)}`, '_blank');
+              }}
+              className="w-full flex items-center justify-center gap-3 bg-[#25D366] hover:bg-[#128C7E] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.95]"
+            >
+              <span>إرسال رسالة التفعيل</span>
+            </button>
+            
+            <button
+              onClick={() => auth.signOut()}
+              className="mt-6 text-sm font-bold text-gray-400 hover:text-red-500 transition-colors"
+            >
+              تسجيل الخروج
+            </button>
+          </motion.div>
         ) : (
           <motion.div
             key="content"
