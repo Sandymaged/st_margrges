@@ -12,6 +12,7 @@ import Layout from './components/Layout';
 import Auth from './components/Auth';
 import ScoutProfileView from './components/ScoutProfile';
 import AdminDashboard from './components/AdminDashboard';
+import { LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
@@ -100,13 +101,20 @@ export default function App() {
           </motion.div>
         ) : !profile ? (
           <motion.div
-            key="no-profile"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center p-12 bg-white rounded-3xl shadow-sm"
+            key="auth-complete"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="min-h-screen bg-[#F0F2F5] p-4 flex flex-col items-center justify-center"
           >
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">لم يتم العثور على ملفك الشخصي</h2>
-            <p className="text-gray-600">يرجى التواصل مع المسؤول لمراجعة حسابك.</p>
+            <Auth />
+            <button
+              onClick={() => auth.signOut()}
+              className="mt-8 text-gray-500 font-bold hover:text-red-600 transition-all flex items-center gap-2"
+            >
+              <LogOut size={20} />
+              <span>تسجيل الخروج والعودة للرئيسية</span>
+            </button>
           </motion.div>
         ) : (
           <motion.div

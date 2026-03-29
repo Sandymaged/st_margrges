@@ -19,6 +19,7 @@ import {
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
+  const [isCompletingProfile, setIsCompletingProfile] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
@@ -106,6 +107,18 @@ export default function Auth() {
     }
   }, [badgeSettings, stage, selectedCategory2, selectedCategory3]);
 
+  useEffect(() => {
+    if (auth.currentUser) {
+      setIsCompletingProfile(true);
+      setIsLogin(false);
+      // Pre-fill phone if possible from email
+      const emailPhone = auth.currentUser.email?.split('@')[0];
+      if (emailPhone && PHONE_REGEX.test(emailPhone)) {
+        setPhone(emailPhone);
+      }
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -121,16 +134,21 @@ export default function Auth() {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, fakeEmail, password);
       } else {
-        // Sign Up Flow
+        // Sign Up or Complete Profile Flow
         if ((badge1 && badge2 && badge1 === badge2) || 
             (badge1 && badge3 && badge1 === badge3) || 
             (badge2 && badge3 && badge2 === badge3)) {
           throw new Error('لا يمكن اختيار نفس الشارة أكثر من مرة');
         }
 
-        // Create User in Auth
-        const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
-        const user = userCredential.user;
+        let user;
+        if (isCompletingProfile && auth.currentUser) {
+          user = auth.currentUser;
+        } else {
+          // Create User in Auth
+          const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
+          user = userCredential.user;
+        }
 
         // Create profile
         const profile: ScoutProfile = {
@@ -181,10 +199,10 @@ export default function Auth() {
             />
           </div>
           <h2 className="text-3xl font-black text-gray-800">
-            {isLogin ? 'تسجيل الدخول' : 'إنشاء حساب كشاف'}
+            {isCompletingProfile ? 'إكمال بيانات الملف الشخصي' : isLogin ? 'تسجيل الدخول' : 'إنشاء حساب كشاف'}
           </h2>
           <p className="text-gray-500 mt-2">
-            {isLogin ? `أهلاً بك مجدداً في ${generalSettings.scoutGroupName}` : 'سجل بياناتك للانضمام إلينا'}
+            {isCompletingProfile ? 'يرجى إكمال بياناتك للمتابعة' : isLogin ? `أهلاً بك مجدداً في ${generalSettings.scoutGroupName}` : 'سجل بياناتك للانضمام إلينا'}
           </p>
         </div>
 
@@ -255,26 +273,29 @@ export default function Auth() {
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all disabled:bg-gray-50"
                     placeholder="01xxxxxxxxx"
                     maxLength={11}
+                    disabled={isCompletingProfile}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
-                    <Lock size={16} className="text-[#4285F4]" /> كلمة المرور
-                  </label>
-                  <input
-                    required
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
-                    placeholder="••••••••"
-                    minLength={6}
-                  />
-                </div>
+                {!isCompletingProfile && (
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
+                      <Lock size={16} className="text-[#4285F4]" /> كلمة المرور
+                    </label>
+                    <input
+                      required
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
+                      placeholder="••••••••"
+                      minLength={6}
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
@@ -380,7 +401,7 @@ export default function Auth() {
               ) : (
                 <>
                   {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
-                  <span>{isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
+                  <span>{isCompletingProfile ? 'حفظ البيانات' : isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
                 </>
               )}
             </button>
@@ -401,17 +422,19 @@ export default function Auth() {
           </div>
         </form>
 
-        <div className="mt-8 text-center">
-          <button
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setError('');
-            }}
-            className="text-[#4285F4] font-bold hover:underline"
-          >
-            {isLogin ? 'ليس لديك حساب؟ سجل الآن' : 'لديك حساب بالفعل؟ سجل دخولك'}
-          </button>
-        </div>
+        {!isCompletingProfile && (
+          <div className="mt-8 text-center">
+            <button
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setError('');
+              }}
+              className="text-[#4285F4] font-bold hover:underline"
+            >
+              {isLogin ? 'ليس لديك حساب؟ سجل الآن' : 'لديك حساب بالفعل؟ سجل دخولك'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
