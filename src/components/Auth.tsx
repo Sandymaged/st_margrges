@@ -44,10 +44,6 @@ export default function Auth() {
   const [selectedCategory2, setSelectedCategory2] = useState('');
   const [selectedCategory3, setSelectedCategory3] = useState('');
 
-  // Verification State
-  const [showVerificationStep, setShowVerificationStep] = useState(false);
-  const [createdUid, setCreatedUid] = useState('');
-
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
       if (docSnap.exists()) {
@@ -149,14 +145,12 @@ export default function Auth() {
             badge3: { name: badge3, progress: 0, notes: '', completedRequirements: [] },
           },
           role: 'scout',
-          isVerified: false, // Initially false
+          isVerified: true, // Set to true by default
           createdAt: serverTimestamp(),
           joinDate: serverTimestamp(),
         };
 
         await setDoc(doc(db, 'users', user.uid), profile);
-        setCreatedUid(user.uid);
-        setShowVerificationStep(true);
       }
     } catch (err: any) {
       console.error('Auth error:', err);
@@ -235,32 +229,6 @@ export default function Auth() {
                   />
                 </div>
               </>
-            ) : showVerificationStep ? (
-              <div className="md:col-span-2 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100 text-center">
-                  <p className="text-blue-800 font-bold mb-2">تم إنشاء الحساب بنجاح!</p>
-                  <p className="text-sm text-blue-600">
-                    يرجى تفعيل حسابك عن طريق إرسال رسالة للمسؤول عبر الواتساب.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const adminNumber = '01555165366';
-                    const message = `VERIFY_USER_PHONE_${phone}`;
-                    window.open(`https://wa.me/2${adminNumber}?text=${encodeURIComponent(message)}`, '_blank');
-                  }}
-                  className="w-full flex items-center justify-center gap-3 bg-[#25D366] hover:bg-[#128C7E] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98]"
-                >
-                  <MessageSquare size={20} />
-                  <span>تفعيل عبر واتساب</span>
-                </button>
-
-                <p className="text-center text-xs text-gray-500">
-                  بعد إرسال الرسالة، سيقوم المسؤول بمراجعة حسابك وتفعيله في أقرب وقت.
-                </p>
-              </div>
             ) : (
               <>
                 {/* Signup Fields */}
@@ -402,22 +370,20 @@ export default function Auth() {
           </div>
 
           <div className="space-y-4">
-            {!showVerificationStep && (
-              <button
-                disabled={loading || (!isLogin && (!badge1 || !badge2 || !badge3))}
-                type="submit"
-                className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
-              >
-                {loading ? (
-                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/50 border-t-white" />
-                ) : (
-                  <>
-                    {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
-                    <span>{isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
-                  </>
-                )}
-              </button>
-            )}
+            <button
+              disabled={loading || (!isLogin && (!badge1 || !badge2 || !badge3))}
+              type="submit"
+              className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
+            >
+              {loading ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/50 border-t-white" />
+              ) : (
+                <>
+                  {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
+                  <span>{isLogin ? 'دخول' : 'إنشاء الحساب'}</span>
+                </>
+              )}
+            </button>
 
             {isLogin && (
               <button

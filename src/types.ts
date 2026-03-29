@@ -28,6 +28,7 @@ export interface ScoutProfile {
     badge3: BadgeProgress;
   };
   role: 'scout' | 'admin';
+  isVerified: boolean;
   permissions?: AdminPermissions;
   createdAt: any;
   joinDate: any;

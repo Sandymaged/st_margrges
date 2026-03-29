@@ -100,6 +100,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
   const [renamingCategoryName, setRenamingCategoryName] = useState('');
   const [showPassedOnly, setShowPassedOnly] = useState(false);
+  const [passThreshold, setPassThreshold] = useState(50);
 
 enum OperationType {
   GET = 'get',
@@ -273,12 +274,12 @@ enum OperationType {
                          normalizeArabic(s.badges.badge3.name) === normalizedBadge;
         if (!hasBadge) return false;
 
-        // Apply 50% filter if active
+        // Apply filter if active
         if (showPassedOnly) {
           const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
                          : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
                          : 'badge3';
-          if ((s.badges[badgeKey].progress || 0) < 50) return false;
+          if ((s.badges[badgeKey].progress || 0) < passThreshold) return false;
         }
 
         return true;
@@ -1360,14 +1361,27 @@ enum OperationType {
 
               {gradingSelectedBadge && (
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowPassedOnly(!showPassedOnly)}
-                    className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all font-bold text-sm ${showPassedOnly ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
-                    title="عرض الناجحين فقط (50%+)"
-                  >
-                    <CheckCircle2 size={16} />
-                    <span className="hidden lg:inline">ناجح (50%+)</span>
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setShowPassedOnly(!showPassedOnly)}
+                      className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all font-bold text-sm ${showPassedOnly ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                      title={`عرض الناجحين فقط (${passThreshold}%+)`}
+                    >
+                      <CheckCircle2 size={16} />
+                      <span className="hidden lg:inline">ناجح ({passThreshold}%+)</span>
+                    </button>
+                    <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-2xl px-3 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={passThreshold}
+                        onChange={(e) => setPassThreshold(Number(e.target.value))}
+                        className="w-10 bg-transparent border-none outline-none font-bold text-gray-700 text-center text-sm"
+                      />
+                      <span className="text-xs font-bold text-gray-400">%</span>
+                    </div>
+                  </div>
                   <button
                     onClick={exportGradingToExcel}
                     className="flex items-center gap-2 px-4 py-3 rounded-2xl border bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-all font-bold text-sm"
@@ -1417,12 +1431,12 @@ enum OperationType {
                   }
 
                   const filteredScouts = stageScoutsWithBadge.filter(s => {
-                    // Apply 50% filter if active
+                    // Apply filter if active
                     if (showPassedOnly) {
                       const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
                                      : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
                                      : 'badge3';
-                      if ((s.badges[badgeKey].progress || 0) < 50) return false;
+                      if ((s.badges[badgeKey].progress || 0) < passThreshold) return false;
                     }
 
                     if (gradingSearchTerm) {
