@@ -21,7 +21,9 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
         const data = docSnap.data();
         setBadgeSettings({
           categories: data.categories || [],
-          requirements: data.requirements || {}
+          requirements: data.requirements || {},
+          requirementMaxScores: data.requirementMaxScores || {},
+          requirementCategories: data.requirementCategories || {}
         });
       }
     });

@@ -60,10 +60,15 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     requirementMaxScores: {},
     requirementCategories: {}
   });
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
+    logoUrl: '',
+    scoutGroupName: 'مجموعة مارجرجس الكشفية',
+    allowedRegistrationStages: [...STAGES]
+  });
   const [selectedBadgeForReq, setSelectedBadgeForReq] = useState<string>('');
   const [newRequirementInput, setNewRequirementInput] = useState('');
   const [newRequirementCategory, setNewRequirementCategory] = useState('');
-  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup'>('categories');
+  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general'>('categories');
   const [selectedCategoryForEdit, setSelectedCategoryForEdit] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
@@ -95,6 +100,13 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     managedStages: [],
     managedBadges: []
   });
+  const [editingRequirement, setEditingRequirement] = useState<{
+    badgeName: string;
+    oldText: string;
+    newText: string;
+    category: string;
+    stage: Stage | 'all';
+  } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [isDeletingAuth, setIsDeletingAuth] = useState(false);
@@ -164,7 +176,8 @@ enum OperationType {
     return str.replace(/[٠-٩]/g, d => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(d)]);
   };
 
-  const canEditBadge = (scoutStage: Stage, badgeName: string) => {
+  const canEditBadge = (scoutStage: Stage, badgeName: string, scoutUid?: string) => {
+    if (scoutUid && scoutUid === currentProfile?.uid) return false;
     if (canManageAllBadges) return true;
     if (!currentProfile?.permissions) return false;
     
@@ -262,9 +275,20 @@ enum OperationType {
       }
     });
 
+    const unsubscribeGeneralSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as GeneralSettings;
+        setGeneralSettings({
+          ...data,
+          allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES]
+        });
+      }
+    });
+
     return () => {
       unsubscribeUsers();
       unsubscribeSettings();
+      unsubscribeGeneralSettings();
     };
   }, [isSuperAdmin]);
 
@@ -409,11 +433,13 @@ enum OperationType {
     if (!category) return [];
     
     if (scoutStage) {
-      // If there are stage-specific badges, use them
-      const stageKey = Object.keys(category.stageBadges || {}).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
-      if (stageKey && category.stageBadges && category.stageBadges[stageKey as Stage]) {
-        return category.stageBadges[stageKey as Stage] || [];
+      // If there are stage-specific badges configured for ANY stage,
+      // then only return the badges explicitly configured for THIS stage.
+      if (category.stageBadges && Object.keys(category.stageBadges).length > 0) {
+        const stageKey = Object.keys(category.stageBadges).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
+        return stageKey ? (category.stageBadges[stageKey as Stage] || []) : [];
       }
+      
       // Otherwise return all badges in category
       return category.badges || [];
     }
@@ -684,6 +710,68 @@ enum OperationType {
       setNewRequirementInput('');
       setNewRequirementCategory('');
       setMessage({ type: 'success', text: 'تم إضافة البند بنجاح' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+    }
+  };
+
+  const handleEditRequirement = async () => {
+    if (!editingRequirement || !editingRequirement.newText.trim()) return;
+    
+    const { badgeName, oldText, newText, category, stage } = editingRequirement;
+    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+    
+    let newBadgeReqs: Partial<Record<Stage | 'all', string[]>>;
+    if (Array.isArray(currentBadgeReqs)) {
+      newBadgeReqs = { all: [...currentBadgeReqs] };
+    } else {
+      newBadgeReqs = { ...currentBadgeReqs };
+    }
+    
+    if (newBadgeReqs[stage]) {
+      newBadgeReqs[stage] = newBadgeReqs[stage]!.map(r => r === oldText ? newText.trim() : r);
+    }
+
+    const updatedRequirements = {
+      ...(badgeSettings.requirements || {}),
+      [badgeName]: newBadgeReqs
+    };
+
+    // Update category
+    const updatedCategories = {
+      ...(badgeSettings.requirementCategories || {}),
+      [badgeName]: {
+        ...(badgeSettings.requirementCategories?.[badgeName] || {}),
+        [newText.trim()]: category.trim() || 'عام'
+      }
+    };
+    
+    // Remove old category if text changed
+    if (oldText !== newText.trim()) {
+      delete updatedCategories[badgeName][oldText];
+      
+      // Also update max scores if text changed
+      if (badgeSettings.requirementMaxScores?.[badgeName]?.[oldText]) {
+        const updatedMaxScores = {
+          ...(badgeSettings.requirementMaxScores || {}),
+          [badgeName]: {
+            ...(badgeSettings.requirementMaxScores?.[badgeName] || {}),
+            [newText.trim()]: badgeSettings.requirementMaxScores[badgeName][oldText]
+          }
+        };
+        delete updatedMaxScores[badgeName][oldText];
+        badgeSettings.requirementMaxScores = updatedMaxScores;
+      }
+    }
+
+    try {
+      await setDoc(doc(db, 'settings', 'badges'), { 
+        ...badgeSettings, 
+        requirements: updatedRequirements,
+        requirementCategories: updatedCategories
+      });
+      setEditingRequirement(null);
+      setMessage({ type: 'success', text: 'تم تعديل البند بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
     }
@@ -1024,6 +1112,12 @@ enum OperationType {
             >
               بنود الشارات
             </button>
+            <button
+              onClick={() => setSettingsTab('general')}
+              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'general' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              إعدادات عامة
+            </button>
             {canDeleteAccounts && (
               <button
                 onClick={() => setSettingsTab('cleanup')}
@@ -1239,26 +1333,51 @@ enum OperationType {
                             <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
                             لكل المراحل
                           </h4>
-                          <div className="space-y-2">
-                            {getReqsForStage(selectedBadgeForReq, 'all').map((req, idx) => (
-                              <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
-                                <span className="font-bold text-gray-700 text-sm flex-1">
-                                  {req}
-                                  <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full mr-3 inline-block leading-normal">
-                                    {badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام'}
-                                  </span>
-                                </span>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <button 
-                                    onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
-                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
+                          <div className="space-y-4">
+                            {getReqsForStage(selectedBadgeForReq, 'all').length > 0 ? (
+                              Object.entries(
+                                getReqsForStage(selectedBadgeForReq, 'all').reduce((acc, req) => {
+                                  const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
+                                  if (!acc[category]) acc[category] = [];
+                                  acc[category].push(req);
+                                  return acc;
+                                }, {} as Record<string, string[]>)
+                              ).map(([category, reqs]) => (
+                                <div key={category} className="space-y-2">
+                                  <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
+                                    {category} :-
+                                  </h5>
+                                  {reqs.map((req, idx) => (
+                                    <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
+                                      <span className="font-bold text-gray-700 text-sm flex-1">
+                                        {req}
+                                      </span>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <button 
+                                          onClick={() => setEditingRequirement({
+                                            badgeName: selectedBadgeForReq,
+                                            oldText: req,
+                                            newText: req,
+                                            category: category,
+                                            stage: 'all'
+                                          })}
+                                          className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                          title="تعديل البند"
+                                        >
+                                          <Edit2 size={16} />
+                                        </button>
+                                        <button 
+                                          onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
+                                          className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
-                              </div>
-                            ))}
-                            {getReqsForStage(selectedBadgeForReq, 'all').length === 0 && (
+                              ))
+                            ) : (
                               <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود عامة</p>
                             )}
                           </div>
@@ -1271,26 +1390,51 @@ enum OperationType {
                               <div className="w-1.5 h-1.5 rounded-full bg-[#4285F4]" />
                               مرحلة: {stage}
                             </h4>
-                            <div className="space-y-2">
-                              {getReqsForStage(selectedBadgeForReq, stage).map((req, idx) => (
-                                <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
-                                  <span className="font-bold text-gray-700 text-sm flex-1">
-                                    {req}
-                                    <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full mr-3 inline-block leading-normal">
-                                      {badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام'}
-                                    </span>
-                                  </span>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <button 
-                                      onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
-                                      className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                    >
-                                      <Trash2 size={16} />
-                                    </button>
+                            <div className="space-y-4">
+                              {getReqsForStage(selectedBadgeForReq, stage).length > 0 ? (
+                                Object.entries(
+                                  getReqsForStage(selectedBadgeForReq, stage).reduce((acc, req) => {
+                                    const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
+                                    if (!acc[category]) acc[category] = [];
+                                    acc[category].push(req);
+                                    return acc;
+                                  }, {} as Record<string, string[]>)
+                                ).map(([category, reqs]) => (
+                                  <div key={category} className="space-y-2">
+                                    <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
+                                      {category} :-
+                                    </h5>
+                                    {reqs.map((req, idx) => (
+                                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
+                                        <span className="font-bold text-gray-700 text-sm flex-1">
+                                          {req}
+                                        </span>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <button 
+                                            onClick={() => setEditingRequirement({
+                                              badgeName: selectedBadgeForReq,
+                                              oldText: req,
+                                              newText: req,
+                                              category: category,
+                                              stage: stage
+                                            })}
+                                            className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                            title="تعديل البند"
+                                          >
+                                            <Edit2 size={16} />
+                                          </button>
+                                          <button 
+                                            onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
+                                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
-                                </div>
-                              ))}
-                              {getReqsForStage(selectedBadgeForReq, stage).length === 0 && (
+                                ))
+                              ) : (
                                 <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود لهذه المرحلة</p>
                               )}
                             </div>
@@ -1346,7 +1490,7 @@ enum OperationType {
                 </div>
               </div>
             </div>
-          ) : (
+          ) : settingsTab === 'cleanup' ? (
               <div className="space-y-6">
                 <div>
                   <h2 className="text-2xl font-black text-gray-800 mb-2">إدارة الحسابات العالقة</h2>
@@ -1392,9 +1536,52 @@ enum OperationType {
                   </div>
                 </div>
               </div>
-            )}
-          </div>
-        ) : activeTab === 'grading' ? (
+          ) : settingsTab === 'general' ? (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 mb-2">الإعدادات العامة</h2>
+                <p className="text-gray-500 font-bold">تحكم في إعدادات النظام العامة وصلاحيات التسجيل.</p>
+              </div>
+
+              <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                <h3 className="text-xl font-bold text-gray-800 mb-4">المراحل المسموح لها بالتسجيل</h3>
+                <p className="text-sm text-gray-500 mb-6">اختر المراحل التي يمكنها إنشاء حسابات جديدة حالياً. المراحل غير المحددة لن تتمكن من التسجيل.</p>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {STAGES.map(stage => {
+                    const isAllowed = generalSettings.allowedRegistrationStages?.includes(stage) ?? true;
+                    return (
+                      <label key={stage} className={`flex items-center gap-3 p-4 rounded-2xl border cursor-pointer transition-all ${isAllowed ? 'border-[#4285F4] bg-[#4285F4]/5' : 'border-gray-200 hover:bg-gray-50'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isAllowed}
+                          onChange={async (e) => {
+                            const currentAllowed = generalSettings.allowedRegistrationStages || [...STAGES];
+                            const newAllowed = e.target.checked
+                              ? [...currentAllowed, stage]
+                              : currentAllowed.filter(s => s !== stage);
+                            
+                            try {
+                              await setDoc(doc(db, 'settings', 'general'), {
+                                allowedRegistrationStages: newAllowed
+                              }, { merge: true });
+                            } catch (error) {
+                              console.error('Error updating allowed stages:', error);
+                              alert('حدث خطأ أثناء تحديث الإعدادات');
+                            }
+                          }}
+                          className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                        />
+                        <span className={`font-bold ${isAllowed ? 'text-[#4285F4]' : 'text-gray-600'}`}>{stage}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : activeTab === 'grading' ? (
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
           <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center border-b border-gray-100 pb-6">
             <h2 className="text-2xl font-black text-gray-800">تقييم البنود</h2>
@@ -1507,7 +1694,7 @@ enum OperationType {
                                      normalizeArabic(s.badges.badge2.name) === normalizedBadge || 
                                      normalizeArabic(s.badges.badge3.name) === normalizedBadge;
                     if (!hasBadge) return false;
-                    return canEditBadge(s.stage, gradingSelectedBadge);
+                    return canEditBadge(s.stage, gradingSelectedBadge, s.uid);
                   });
 
                   // Show stage if it has scouts OR if it has requirements (for super admin or stage admin to set scores)
@@ -1556,15 +1743,21 @@ enum OperationType {
                               <th className="p-4 font-bold text-gray-600 w-[120px] md:w-[200px] min-w-[120px] md:min-w-[200px] max-w-[120px] md:max-w-[200px] sticky right-0 bg-gray-50 z-10 border-l border-gray-200">بيانات الكشاف</th>
                               {stageReqs.map((req, idx) => {
                                 const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
+                                const category = badgeSettings.requirementCategories?.[gradingSelectedBadge]?.[req] || 'عام';
                                 return (
                                   <th key={idx} className="p-4 font-bold text-gray-600 min-w-[200px] border-l border-gray-200 last:border-l-0">
                                     <div className="flex flex-col gap-1">
                                       <span className="text-sm truncate" title={req}>{req}</span>
-                                      {maxScore && maxScore > 0 && (
-                                        <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full w-fit inline-block leading-normal">
-                                          من {maxScore}
+                                      <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-[10px] text-[#4285F4] bg-[#4285F4]/10 px-2 py-1 rounded-md inline-block leading-normal">
+                                          {category}
                                         </span>
-                                      )}
+                                        {maxScore && maxScore > 0 && (
+                                          <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full w-fit inline-block leading-normal">
+                                            من {maxScore}
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </th>
                                 );
@@ -1628,10 +1821,11 @@ enum OperationType {
                                   const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
                                   const isCompleted = completedReqs.includes(req);
                                   const currentScore = scores[req];
-                                  const canEdit = canEditBadge(scout.stage, gradingSelectedBadge);
+                                  const isSelf = scout.uid === currentProfile?.uid;
+                                  const canEdit = canEditBadge(scout.stage, gradingSelectedBadge, scout.uid);
 
                                   return (
-                                    <td key={idx} className="p-4 border-l border-gray-200 last:border-l-0">
+                                    <td key={idx} className={`p-4 border-l border-gray-200 last:border-l-0 ${isSelf ? 'bg-gray-50/50' : ''}`}>
                                       <div className="flex items-center gap-3">
                                         {maxScore && maxScore > 0 && (
                                           <div className="flex items-center gap-2">
@@ -1657,13 +1851,16 @@ enum OperationType {
                                         )}
                                         
                                         <div className="flex-1 flex justify-end items-center gap-2">
+                                          {isSelf && (
+                                            <span className="text-[10px] font-bold text-orange-500 bg-orange-50 px-2 py-1 rounded">لا يمكنك تقييم نفسك</span>
+                                          )}
                                           <button
                                             onClick={() => {
                                               if (!canEdit) return;
                                               setMessage({ type: 'success', text: 'تم حفظ التعديلات بنجاح' });
                                             }}
                                             disabled={!canEdit}
-                                            className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition-colors leading-normal"
+                                            className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition-colors leading-normal disabled:opacity-50"
                                           >
                                             حفظ
                                           </button>
@@ -2180,7 +2377,7 @@ enum OperationType {
                     const reqs = getScoutBadgeRequirements(badgeName, editingScout.stage);
                     const completedReqs = (badge.completedRequirements || []).filter(r => reqs.includes(r));
                     const hasReqs = reqs.length > 0;
-                    const canEdit = canEditBadge(editingScout.stage, badgeName);
+                    const canEdit = canEditBadge(editingScout.stage, badgeName, editingScout.uid);
                     
                     // Badge Selection Logic
                     const scoutCategory = (badgeSettings.categories || []).find(c => c.id === 'scout');
@@ -2308,71 +2505,85 @@ enum OperationType {
                             </div>
 
                             {hasReqs ? (
-                              <div className="space-y-2 bg-white p-4 rounded-2xl border border-gray-100">
+                              <div className="space-y-4 bg-white p-4 rounded-2xl border border-gray-100">
                                 <h5 className="text-sm font-bold text-gray-700 mb-3">متطلبات الشارة:</h5>
-                                {reqs.map((req, idx) => {
-                                  const maxScore = badgeSettings.requirementMaxScores?.[badge.name]?.[req] || 0;
-                                  const isCompleted = completedReqs.includes(req);
-                                  const currentScore = badge.requirementScores?.[req] || 0;
-                                  
-                                  return (
-                                    <div key={idx} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl transition-colors ${canEdit ? 'hover:bg-gray-50' : ''}`}>
-                                      <label className={`flex items-start gap-3 flex-1 ${canEdit ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                                        <div className="relative flex items-center justify-center mt-0.5">
-                                          <input
-                                            type="checkbox"
-                                            disabled={!canEdit}
-                                            checked={isCompleted}
-                                            onChange={(e) => {
-                                              if (!canEdit) return;
-                                              let newCompleted = [...completedReqs];
-                                              if (e.target.checked) {
-                                                newCompleted.push(req);
-                                              } else {
-                                                newCompleted = newCompleted.filter(r => r !== req);
-                                              }
-                                              updateBadgeValue(key, 'completedRequirements', newCompleted);
-                                              updateBadgeValue(key, 'progress', calculateBadgeProgress(badge.name, reqs, newCompleted, badge.requirementScores));
-                                            }}
-                                            className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4] cursor-pointer"
-                                          />
-                                        </div>
-                                        <div className="flex flex-col">
-                                          <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
-                                            {req}
-                                          </span>
-                                          <div className="flex items-center gap-3 mt-1">
-                                            <span className={`text-xs font-bold ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                                              {isCompleted ? 'تم التسليم' : 'تسليم'}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      </label>
+                                {Object.entries(
+                                  reqs.reduce((acc, req) => {
+                                    const category = badgeSettings.requirementCategories?.[badge.name]?.[req] || 'عام';
+                                    if (!acc[category]) acc[category] = [];
+                                    acc[category].push(req);
+                                    return acc;
+                                  }, {} as Record<string, string[]>)
+                                ).map(([category, categoryReqs]) => (
+                                  <div key={category} className="space-y-2">
+                                    <h6 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
+                                      {category} :-
+                                    </h6>
+                                    {categoryReqs.map((req, idx) => {
+                                      const maxScore = badgeSettings.requirementMaxScores?.[badge.name]?.[req] || 0;
+                                      const isCompleted = completedReqs.includes(req);
+                                      const currentScore = badge.requirementScores?.[req] || 0;
                                       
-                                      {maxScore > 0 && (
-                                        <div className="flex items-center gap-2 shrink-0 bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200">
-                                          <ScoreInput
-                                            maxScore={maxScore}
-                                            currentScore={currentScore}
-                                            canEdit={canEdit}
-                                            className="w-16 text-center bg-white border border-gray-300 rounded-md outline-none text-sm font-bold text-[#4285F4] disabled:bg-transparent disabled:border-transparent"
-                                            onSave={(numVal) => {
-                                              const newScores = { ...(badge.requirementScores || {}) };
-                                              if (numVal === undefined) {
-                                                delete newScores[req];
-                                              } else {
-                                                newScores[req] = numVal;
-                                              }
-                                              updateBadgeValue(key, 'requirementScores', newScores);
-                                              updateBadgeValue(key, 'progress', calculateBadgeProgress(badge.name, reqs, completedReqs, newScores));
-                                            }}
-                                          />
-                                          <span className="text-xs font-bold text-gray-500">من {maxScore}</span>
+                                      return (
+                                        <div key={idx} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl transition-colors ${canEdit ? 'hover:bg-gray-50' : ''}`}>
+                                          <label className={`flex items-start gap-3 flex-1 ${canEdit ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                                            <div className="relative flex items-center justify-center mt-0.5">
+                                              <input
+                                                type="checkbox"
+                                                disabled={!canEdit}
+                                                checked={isCompleted}
+                                                onChange={(e) => {
+                                                  if (!canEdit) return;
+                                                  let newCompleted = [...completedReqs];
+                                                  if (e.target.checked) {
+                                                    newCompleted.push(req);
+                                                  } else {
+                                                    newCompleted = newCompleted.filter(r => r !== req);
+                                                  }
+                                                  updateBadgeValue(key, 'completedRequirements', newCompleted);
+                                                  updateBadgeValue(key, 'progress', calculateBadgeProgress(badge.name, reqs, newCompleted, badge.requirementScores));
+                                                }}
+                                                className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4] cursor-pointer"
+                                              />
+                                            </div>
+                                            <div className="flex flex-col">
+                                              <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                                                {req}
+                                              </span>
+                                              <div className="flex items-center gap-3 mt-1">
+                                                <span className={`text-xs font-bold ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                                                  {isCompleted ? 'تم التسليم' : 'تسليم'}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          </label>
+                                          
+                                          {maxScore > 0 && (
+                                            <div className="flex items-center gap-2 shrink-0 bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200">
+                                              <ScoreInput
+                                                maxScore={maxScore}
+                                                currentScore={currentScore}
+                                                canEdit={canEdit}
+                                                className="w-16 text-center bg-white border border-gray-300 rounded-md outline-none text-sm font-bold text-[#4285F4] disabled:bg-transparent disabled:border-transparent"
+                                                onSave={(numVal) => {
+                                                  const newScores = { ...(badge.requirementScores || {}) };
+                                                  if (numVal === undefined) {
+                                                    delete newScores[req];
+                                                  } else {
+                                                    newScores[req] = numVal;
+                                                  }
+                                                  updateBadgeValue(key, 'requirementScores', newScores);
+                                                  updateBadgeValue(key, 'progress', calculateBadgeProgress(badge.name, reqs, completedReqs, newScores));
+                                                }}
+                                              />
+                                              <span className="text-xs font-bold text-gray-500">من {maxScore}</span>
+                                            </div>
+                                          )}
                                         </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                                      );
+                                    })}
+                                  </div>
+                                ))}
                               </div>
                             ) : (
                               <input
@@ -2578,6 +2789,66 @@ enum OperationType {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+        {/* Edit Requirement Modal */}
+        {editingRequirement && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-gray-100"
+            >
+              <div className="bg-[#4285F4] p-6 text-white flex justify-between items-center text-right" dir="rtl">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-xl">
+                    <Edit2 size={24} />
+                  </div>
+                  <h3 className="text-xl font-black">تعديل البند</h3>
+                </div>
+                <button onClick={() => setEditingRequirement(null)} className="p-2 hover:bg-white/20 rounded-xl transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-6 text-right" dir="rtl">
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-700">نص البند:</label>
+                  <textarea
+                    value={editingRequirement.newText}
+                    onChange={(e) => setEditingRequirement(prev => prev ? { ...prev, newText: e.target.value } : null)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700 min-h-[100px]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-700">التصنيف:</label>
+                  <input
+                    type="text"
+                    value={editingRequirement.category}
+                    onChange={(e) => setEditingRequirement(prev => prev ? { ...prev, category: e.target.value } : null)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700"
+                    placeholder="مثال: روحي، عملي..."
+                  />
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  <button
+                    onClick={handleEditRequirement}
+                    className="flex-1 bg-[#4285F4] hover:bg-[#357ABD] text-white font-black py-4 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Save size={20} />
+                    حفظ التعديلات
+                  </button>
+                  <button
+                    onClick={() => setEditingRequirement(null)}
+                    className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black py-4 rounded-2xl transition-all"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

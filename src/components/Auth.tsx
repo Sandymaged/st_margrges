@@ -106,7 +106,9 @@ export default function Auth() {
         const data = docSnap.data();
         setBadgeSettings({
           categories: data.categories || DEFAULT_CATEGORIES,
-          requirements: data.requirements || {}
+          requirements: data.requirements || {},
+          requirementMaxScores: data.requirementMaxScores || {},
+          requirementCategories: data.requirementCategories || {}
         });
       }
     });
@@ -122,14 +124,24 @@ export default function Auth() {
     return () => unsubscribe();
   }, []);
 
+  // Helper to normalize Arabic text for comparison
+  const normalizeArabic = (str: string) => {
+    return str.replace(/أ|إ|آ/g, 'ا')
+              .replace(/ة/g, 'ه')
+              .replace(/ى/g, 'ي')
+              .trim();
+  };
+
   // Helper to get badges for a category and stage
   const getAvailableBadges = (categoryId: string, scoutStage: Stage) => {
     const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
     if (!category) return [];
     
-    // If there are stage-specific badges, use them
-    if (category.stageBadges && category.stageBadges[scoutStage]) {
-      return category.stageBadges[scoutStage] || [];
+    // If there are stage-specific badges configured for ANY stage,
+    // then only return the badges explicitly configured for THIS stage.
+    if (category.stageBadges && Object.keys(category.stageBadges).length > 0) {
+      const stageKey = Object.keys(category.stageBadges).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
+      return stageKey ? (category.stageBadges[stageKey as Stage] || []) : [];
     }
     
     // Otherwise return all badges in category
@@ -190,9 +202,12 @@ export default function Auth() {
         await signInWithEmailAndPassword(auth, fakeEmail, password);
       } else {
         // Sign Up or Complete Profile Flow
-        if ((badge1 && badge2 && badge1 === badge2) || 
-            (badge1 && badge3 && badge1 === badge3) || 
-            (badge2 && badge3 && badge2 === badge3)) {
+        const selectedBadges = [badge1];
+        if (visibleBadges >= 2 && badge2) selectedBadges.push(badge2);
+        if (visibleBadges >= 3 && badge3) selectedBadges.push(badge3);
+
+        const uniqueBadges = new Set(selectedBadges);
+        if (uniqueBadges.size !== selectedBadges.length) {
           throw new Error('لا يمكن اختيار نفس الشارة أكثر من مرة');
         }
 
@@ -214,8 +229,8 @@ export default function Auth() {
           number: phone,
           badges: {
             badge1: { name: badge1, progress: 0, notes: '', completedRequirements: [] },
-            badge2: { name: badge2, progress: 0, notes: '', completedRequirements: [] },
-            badge3: { name: badge3, progress: 0, notes: '', completedRequirements: [] },
+            badge2: { name: visibleBadges >= 2 ? badge2 : '', progress: 0, notes: '', completedRequirements: [] },
+            badge3: { name: visibleBadges >= 3 ? badge3 : '', progress: 0, notes: '', completedRequirements: [] },
           },
           role: 'scout',
           isVerified: true, // Set to true by default
@@ -365,7 +380,14 @@ export default function Auth() {
                     onChange={(e) => setStage(e.target.value as Stage)}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all bg-white"
                   >
-                    {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                    {STAGES.map(s => {
+                      const isAllowed = generalSettings.allowedRegistrationStages?.includes(s) ?? true;
+                      return (
+                        <option key={s} value={s} disabled={!isAllowed}>
+                          {s} {!isAllowed ? '(التسجيل مغلق)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
@@ -426,7 +448,9 @@ export default function Auth() {
                             required={visibleBadges >= 2}
                           >
                             <option value="">-- اختر تصنيف --</option>
-                            {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            {(badgeSettings.categories || [])
+                              .filter(c => getAvailableBadges(c.id, stage).length > 0)
+                              .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                           </select>
                         </div>
                         <div className="space-y-1">
@@ -469,7 +493,9 @@ export default function Auth() {
                             required={visibleBadges >= 3}
                           >
                             <option value="">-- اختر تصنيف --</option>
-                            {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            {(badgeSettings.categories || [])
+                              .filter(c => getAvailableBadges(c.id, stage).length > 0)
+                              .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                           </select>
                         </div>
                         <div className="space-y-1">
@@ -495,7 +521,7 @@ export default function Auth() {
 
           <div className="space-y-4">
             <button
-              disabled={loading || (!isLogin && (!badge1 || !badge2 || !badge3))}
+              disabled={loading || (!isLogin && (!badge1 || (visibleBadges >= 2 && !badge2) || (visibleBadges >= 3 && !badge3)))}
               type="submit"
               className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
             >

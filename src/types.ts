@@ -59,6 +59,7 @@ export interface BadgeSettings {
 export interface GeneralSettings {
   logoUrl: string;
   scoutGroupName: string;
+  allowedRegistrationStages?: Stage[];
 }
 
 export const DEFAULT_CATEGORIES: BadgeCategory[] = [

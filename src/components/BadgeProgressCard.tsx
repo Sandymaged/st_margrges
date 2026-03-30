@@ -31,32 +31,43 @@ export default function BadgeProgressCard({ badge, label, requirements = [], req
 
       {/* Requirements Checklist */}
       {hasReqs && (
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-4">
           <h4 className="text-sm font-bold text-gray-700 mb-2">متطلبات الشارة:</h4>
-          {requirements.map((req, idx) => {
-            const isCompleted = completedReqs.includes(req);
-            
-            return (
-              <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                {isCompleted ? (
-                  <CheckCircle2 size={20} className="text-[#34A853] shrink-0 mt-0.5" />
-                ) : (
-                  <Circle size={20} className="text-gray-300 shrink-0 mt-0.5" />
-                )}
-                <div className="flex flex-col flex-1">
-                  <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
-                    {req}
-                    <span className="text-xs text-[#4285F4] bg-[#4285F4]/10 px-3 py-1.5 rounded-full mr-3 not-line-through inline-block leading-normal">
-                      {requirementCategories[req] || 'عام'}
-                    </span>
-                  </span>
-                  <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                    {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+          {Object.entries(
+            requirements.reduce((acc, req) => {
+              const category = requirementCategories[req] || 'عام';
+              if (!acc[category]) acc[category] = [];
+              acc[category].push(req);
+              return acc;
+            }, {} as Record<string, string[]>)
+          ).map(([category, reqs]) => (
+            <div key={category} className="space-y-2">
+              <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
+                {category} :-
+              </h5>
+              {reqs.map((req, idx) => {
+                const isCompleted = completedReqs.includes(req);
+                
+                return (
+                  <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                    {isCompleted ? (
+                      <CheckCircle2 size={20} className="text-[#34A853] shrink-0 mt-0.5" />
+                    ) : (
+                      <Circle size={20} className="text-gray-300 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex flex-col flex-1">
+                      <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                        {req}
+                      </span>
+                      <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                        {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
 
