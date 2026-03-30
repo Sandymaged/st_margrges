@@ -15,7 +15,9 @@ import {
   Lock,
   AlertCircle,
   MessageSquare,
-  LogOut
+  LogOut,
+  X,
+  Plus
 } from 'lucide-react';
 
 enum OperationType {
@@ -96,6 +98,7 @@ export default function Auth() {
   
   const [selectedCategory2, setSelectedCategory2] = useState('');
   const [selectedCategory3, setSelectedCategory3] = useState('');
+  const [visibleBadges, setVisibleBadges] = useState<number>(1);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
@@ -367,7 +370,19 @@ export default function Auth() {
                 </div>
 
                 <div className="md:col-span-2 space-y-6 pt-4 border-t">
-                  <h4 className="text-sm font-black text-gray-700">اختر شاراتك:</h4>
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-sm font-black text-gray-700">اختر شاراتك:</h4>
+                    {visibleBadges < 3 && (
+                      <button
+                        type="button"
+                        onClick={() => setVisibleBadges(prev => prev + 1)}
+                        className="text-xs font-bold text-[#4285F4] bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 flex items-center gap-1 transition-colors"
+                      >
+                        <Plus size={14} />
+                        إضافة شارة أخرى
+                      </button>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Badge 1 */}
                     <div className="space-y-3">
@@ -386,60 +401,92 @@ export default function Auth() {
                     </div>
 
                     {/* Badge 2 */}
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase">تصنيف شارة 2</label>
-                        <select
-                          value={selectedCategory2}
-                          onChange={(e) => setSelectedCategory2(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-gray-200 outline-none bg-gray-50 text-xs font-bold"
-                        >
-                          <option value="">-- اختر تصنيف --</option>
-                          {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
+                    {visibleBadges >= 2 && (
+                      <div className="space-y-3 relative p-4 md:p-0 bg-gray-50 md:bg-transparent rounded-xl border md:border-none border-gray-100">
+                        {visibleBadges === 2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVisibleBadges(1);
+                              setBadge2('');
+                              setSelectedCategory2('');
+                            }}
+                            className="absolute -top-2 -left-2 md:-top-2 md:-left-2 bg-red-100 text-red-600 rounded-full p-1.5 hover:bg-red-200 transition-colors z-10 shadow-sm"
+                            title="حذف الشارة"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-gray-400 uppercase">تصنيف شارة 2</label>
+                          <select
+                            value={selectedCategory2}
+                            onChange={(e) => setSelectedCategory2(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 outline-none bg-white md:bg-gray-50 text-xs font-bold"
+                            required={visibleBadges >= 2}
+                          >
+                            <option value="">-- اختر تصنيف --</option>
+                            {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-gray-700">شارة 2</label>
+                          <select
+                            value={badge2}
+                            onChange={(e) => setBadge2(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50"
+                            required={visibleBadges >= 2}
+                            disabled={!selectedCategory2}
+                          >
+                            <option value="">-- اختر شارة --</option>
+                            {selectedCategory2 && getAvailableBadges(selectedCategory2, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge3}>{b}</option>)}
+                          </select>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">شارة 2</label>
-                        <select
-                          value={badge2}
-                          onChange={(e) => setBadge2(e.target.value)}
-                          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50"
-                          required
-                          disabled={!selectedCategory2}
-                        >
-                          <option value="">-- اختر شارة --</option>
-                          {selectedCategory2 && getAvailableBadges(selectedCategory2, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge3}>{b}</option>)}
-                        </select>
-                      </div>
-                    </div>
+                    )}
 
                     {/* Badge 3 */}
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase">تصنيف شارة 3</label>
-                        <select
-                          value={selectedCategory3}
-                          onChange={(e) => setSelectedCategory3(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-gray-200 outline-none bg-gray-50 text-xs font-bold"
+                    {visibleBadges >= 3 && (
+                      <div className="space-y-3 relative p-4 md:p-0 bg-gray-50 md:bg-transparent rounded-xl border md:border-none border-gray-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVisibleBadges(2);
+                            setBadge3('');
+                            setSelectedCategory3('');
+                          }}
+                          className="absolute -top-2 -left-2 md:-top-2 md:-left-2 bg-red-100 text-red-600 rounded-full p-1.5 hover:bg-red-200 transition-colors z-10 shadow-sm"
+                          title="حذف الشارة"
                         >
-                          <option value="">-- اختر تصنيف --</option>
-                          {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
+                          <X size={14} />
+                        </button>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-gray-400 uppercase">تصنيف شارة 3</label>
+                          <select
+                            value={selectedCategory3}
+                            onChange={(e) => setSelectedCategory3(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 outline-none bg-white md:bg-gray-50 text-xs font-bold"
+                            required={visibleBadges >= 3}
+                          >
+                            <option value="">-- اختر تصنيف --</option>
+                            {(badgeSettings.categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-gray-700">شارة 3</label>
+                          <select
+                            value={badge3}
+                            onChange={(e) => setBadge3(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50"
+                            required={visibleBadges >= 3}
+                            disabled={!selectedCategory3}
+                          >
+                            <option value="">-- اختر شارة --</option>
+                            {selectedCategory3 && getAvailableBadges(selectedCategory3, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge2}>{b}</option>)}
+                          </select>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">شارة 3</label>
-                        <select
-                          value={badge3}
-                          onChange={(e) => setBadge3(e.target.value)}
-                          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50"
-                          required
-                          disabled={!selectedCategory3}
-                        >
-                          <option value="">-- اختر شارة --</option>
-                          {selectedCategory3 && getAvailableBadges(selectedCategory3, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge2}>{b}</option>)}
-                        </select>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </>

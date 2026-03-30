@@ -159,6 +159,11 @@ enum OperationType {
       .trim();
   };
 
+  const normalizeNumbers = (str: string) => {
+    if (!str) return '';
+    return str.replace(/[٠-٩]/g, d => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(d)]);
+  };
+
   const canEditBadge = (scoutStage: Stage, badgeName: string) => {
     if (canManageAllBadges) return true;
     if (!currentProfile?.permissions) return false;
@@ -398,6 +403,33 @@ enum OperationType {
     reader.readAsBinaryString(file);
   };
 
+  // Helper to get badges for a category and stage
+  const getAvailableBadges = (categoryId: string, scoutStage?: Stage | '') => {
+    const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
+    if (!category) return [];
+    
+    if (scoutStage) {
+      // If there are stage-specific badges, use them
+      const stageKey = Object.keys(category.stageBadges || {}).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
+      if (stageKey && category.stageBadges && category.stageBadges[stageKey as Stage]) {
+        return category.stageBadges[stageKey as Stage] || [];
+      }
+      // Otherwise return all badges in category
+      return category.badges || [];
+    }
+
+    // If no stage provided, return all badges in this category across all stages
+    const allBadges = new Set(category.badges || []);
+    if (category.stageBadges) {
+      Object.values(category.stageBadges).forEach(badges => {
+        if (Array.isArray(badges)) {
+          badges.forEach(b => allBadges.add(b));
+        }
+      });
+    }
+    return Array.from(allBadges);
+  };
+
   const filteredAndSortedScouts = useMemo(() => {
     return scouts
       .filter(s => {
@@ -408,8 +440,9 @@ enum OperationType {
           if (s.role !== 'admin' && !canEditScout(s)) return false;
         }
 
-        const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                             s.number.includes(searchTerm);
+        const normalizedSearch = normalizeNumbers(searchTerm);
+        const matchesSearch = (s.name && s.name.toLowerCase().includes(searchTerm.toLowerCase())) || 
+                             (s.number && s.number.includes(normalizedSearch));
         const matchesStage = !stageFilter || normalizeArabic(s.stage) === normalizeArabic(stageFilter);
         
         // Category Filter
@@ -439,34 +472,7 @@ enum OperationType {
         }
         return sortOrder === 'asc' ? comparison : -comparison;
       });
-  }, [scouts, searchTerm, stageFilter, categoryFilter, badgeFilter, sortField, sortOrder, currentProfile, isSuperAdmin]);
-
-  // Helper to get badges for a category and stage
-  const getAvailableBadges = (categoryId: string, scoutStage?: Stage | '') => {
-    const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
-    if (!category) return [];
-    
-    if (scoutStage) {
-      // If there are stage-specific badges, use them
-      const stageKey = Object.keys(category.stageBadges || {}).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
-      if (stageKey && category.stageBadges && category.stageBadges[stageKey as Stage]) {
-        return category.stageBadges[stageKey as Stage] || [];
-      }
-      // Otherwise return all badges in category
-      return category.badges || [];
-    }
-
-    // If no stage provided, return all badges in this category across all stages
-    const allBadges = new Set(category.badges || []);
-    if (category.stageBadges) {
-      Object.values(category.stageBadges).forEach(badges => {
-        if (Array.isArray(badges)) {
-          badges.forEach(b => allBadges.add(b));
-        }
-      });
-    }
-    return Array.from(allBadges);
-  };
+  }, [scouts, searchTerm, stageFilter, categoryFilter, badgeFilter, sortField, sortOrder, currentProfile, isSuperAdmin, badgeSettings]);
 
   const handleUpdateScout = async (e?: React.FormEvent, closeAfterSave = true) => {
     if (e) e.preventDefault();
@@ -965,10 +971,10 @@ enum OperationType {
   return (
     <div className="space-y-6">
       {/* Tabs */}
-      <div className="flex gap-4 border-b border-gray-200 pb-4">
+      <div className="flex gap-4 border-b border-gray-200 pb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
         <button
           onClick={() => setActiveTab('scouts')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all ${
+          className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all shrink-0 ${
             activeTab === 'scouts' 
               ? 'bg-[#4285F4] text-white shadow-md' 
               : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
@@ -979,7 +985,7 @@ enum OperationType {
         </button>
         <button
           onClick={() => setActiveTab('grading')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all ${
+          className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all shrink-0 ${
             activeTab === 'grading' 
               ? 'bg-[#4285F4] text-white shadow-md' 
               : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
@@ -991,7 +997,7 @@ enum OperationType {
         {canManageAllBadges && (
           <button
             onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all ${
+            className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all shrink-0 ${
               activeTab === 'settings' 
                 ? 'bg-[#4285F4] text-white shadow-md' 
                 : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
@@ -1005,23 +1011,23 @@ enum OperationType {
 
       {activeTab === 'settings' && canManageAllBadges ? (
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-8">
-          <div className="flex gap-4 border-b border-gray-100 pb-4">
+          <div className="flex gap-4 border-b border-gray-100 pb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
             <button
               onClick={() => setSettingsTab('categories')}
-              className={`px-6 py-2 rounded-xl font-bold transition-all ${settingsTab === 'categories' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'categories' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >
               تصنيف الشارات
             </button>
             <button
               onClick={() => setSettingsTab('requirements')}
-              className={`px-6 py-2 rounded-xl font-bold transition-all ${settingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >
               بنود الشارات
             </button>
             {canDeleteAccounts && (
               <button
                 onClick={() => setSettingsTab('cleanup')}
-                className={`px-6 py-2 rounded-xl font-bold transition-all ${settingsTab === 'cleanup' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'cleanup' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
                 إزالة الحسابات العالقة
               </button>
@@ -1393,7 +1399,7 @@ enum OperationType {
           <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center border-b border-gray-100 pb-6">
             <h2 className="text-2xl font-black text-gray-800">تقييم البنود</h2>
             <div className="flex flex-wrap gap-4 w-full md:w-auto">
-              <div className="relative flex-1 md:w-64">
+              <div className="relative w-full md:w-64">
                 <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                 <input
                   type="text"
@@ -1406,7 +1412,7 @@ enum OperationType {
               <select
                 value={gradingSelectedBadge}
                 onChange={(e) => setGradingSelectedBadge(e.target.value)}
-                className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700"
+                className="w-full md:w-auto px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700"
               >
                 <option value="">اختر الشارة للتقييم</option>
                 {Array.from(new Set([
@@ -1450,8 +1456,8 @@ enum OperationType {
               </select>
 
               {gradingSelectedBadge && (
-                <div className="flex gap-2">
-                  <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-2xl p-1">
+                <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                  <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-2xl p-1 w-full md:w-auto overflow-x-auto scrollbar-hide">
                     <button
                       onClick={() => setBadgePassFilter('all')}
                       className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${badgePassFilter === 'all' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
@@ -1534,7 +1540,8 @@ enum OperationType {
 
                     if (gradingSearchTerm) {
                       const search = gradingSearchTerm.toLowerCase().trim();
-                      return s.name.toLowerCase().includes(search) || s.number.includes(search);
+                      const normalizedSearch = normalizeNumbers(search);
+                      return (s.name && s.name.toLowerCase().includes(search)) || (s.number && s.number.includes(normalizedSearch));
                     }
                     return true;
                   });
@@ -1546,7 +1553,7 @@ enum OperationType {
                         <table className="w-full text-right border-collapse min-w-max">
                           <thead>
                             <tr className="bg-gray-50 border-b border-gray-200">
-                              <th className="p-4 font-bold text-gray-600 w-64 sticky right-0 bg-gray-50 z-10 border-l border-gray-200">بيانات الكشاف</th>
+                              <th className="p-4 font-bold text-gray-600 w-[120px] md:w-[200px] min-w-[120px] md:min-w-[200px] max-w-[120px] md:max-w-[200px] sticky right-0 bg-gray-50 z-10 border-l border-gray-200">بيانات الكشاف</th>
                               {stageReqs.map((req, idx) => {
                                 const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
                                 return (
@@ -1570,7 +1577,7 @@ enum OperationType {
                             {/* Final Score Row (Super Admin and Manage All Badges only) */}
                             {(isSuperAdmin || canManageAllBadges) && (
                               <tr className="bg-blue-50/50 border-b border-blue-100">
-                                <td className="p-4 sticky right-0 bg-blue-50 z-10 border-l border-gray-200 font-black text-[#4285F4]">
+                                <td className="p-4 sticky right-0 bg-blue-50 z-10 border-l border-gray-200 font-black text-[#4285F4] w-[120px] md:w-[200px] min-w-[120px] md:min-w-[200px] max-w-[120px] md:max-w-[200px]">
                                   الدرجة النهائية
                                 </td>
                                 {stageReqs.map((req, idx) => (
@@ -1611,10 +1618,10 @@ enum OperationType {
 
                             return (
                               <tr key={scout.uid} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
-                                <td className="p-4 sticky right-0 bg-white z-10 border-l border-gray-200">
+                                <td className="p-4 sticky right-0 bg-white z-10 border-l border-gray-200 w-[120px] md:w-[200px] min-w-[120px] md:min-w-[200px] max-w-[120px] md:max-w-[200px]">
                                   <div className="flex flex-col">
-                                    <span className="font-bold text-gray-800">{scout.name}</span>
-                                    <span className="text-sm text-gray-500">{scout.number}</span>
+                                    <span className="font-bold text-gray-800 truncate" title={scout.name}>{scout.name}</span>
+                                    <span className="text-xs md:text-sm text-gray-500 truncate" title={scout.number}>{scout.number}</span>
                                   </div>
                                 </td>
                                 {stageReqs.map((req, idx) => {
