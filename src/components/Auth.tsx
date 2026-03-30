@@ -77,7 +77,7 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
-    logoUrl: '/logo.png',
+    logoUrl: '/syncc.png',
     scoutGroupName: 'مجموعة مارجرجس الكشفية'
   });
 

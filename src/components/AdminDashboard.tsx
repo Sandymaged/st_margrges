@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { initializeApp, getApp, getApps } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
+import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { 
   ScoutProfile, 
   STAGES, 
@@ -61,7 +64,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     requirementCategories: {}
   });
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
-    logoUrl: '',
+    logoUrl: '/syncc.png',
     scoutGroupName: 'مجموعة مارجرجس الكشفية',
     allowedRegistrationStages: [...STAGES]
   });
@@ -115,6 +118,14 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
   const [renamingCategoryName, setRenamingCategoryName] = useState('');
   const [badgePassFilter, setBadgePassFilter] = useState<'all' | 'passed' | 'failed'>('all');
+  const [newAccountForm, setNewAccountForm] = useState({
+    name: '',
+    phone: '',
+    password: '',
+    stage: STAGES[0] as Stage,
+    role: 'scout' as 'scout' | 'admin'
+  });
+  const [creatingAccount, setCreatingAccount] = useState(false);
 
 enum OperationType {
   GET = 'get',
@@ -176,8 +187,12 @@ enum OperationType {
     return str.replace(/[٠-٩]/g, d => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(d)]);
   };
 
-  const canEditBadge = (scoutStage: Stage, badgeName: string, scoutUid?: string) => {
+  const canEditBadge = (scoutStage: Stage, badgeName: string, scoutUid?: string, scoutRole?: string) => {
     if (scoutUid && scoutUid === currentProfile?.uid) return false;
+    
+    // If target is an admin, only super admin can grade them
+    if (scoutRole === 'admin' && !isSuperAdmin) return false;
+
     if (canManageAllBadges) return true;
     if (!currentProfile?.permissions) return false;
     
@@ -279,7 +294,7 @@ enum OperationType {
       if (docSnap.exists()) {
         const data = docSnap.data() as GeneralSettings;
         setGeneralSettings({
-          logoUrl: data.logoUrl || '/logo.png',
+          logoUrl: data.logoUrl || '/syncc.png',
           scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
           allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES]
         });
@@ -352,6 +367,71 @@ enum OperationType {
     });
 
     XLSX.writeFile(workbook, `تقييم_${gradingSelectedBadge}_${new Date().toLocaleDateString()}.xlsx`);
+  };
+
+  const handleCreateAccount = async () => {
+    if (!isSuperAdmin) return;
+    if (!newAccountForm.name || !newAccountForm.phone || !newAccountForm.password) {
+      setMessage({ type: 'error', text: 'يرجى ملء جميع البيانات المطلوبة' });
+      return;
+    }
+
+    if (!PHONE_REGEX.test(newAccountForm.phone)) {
+      setMessage({ type: 'error', text: 'رقم الهاتف غير صحيح (يجب أن يكون 11 رقم)' });
+      return;
+    }
+
+    setCreatingAccount(true);
+    let secondaryApp;
+    try {
+      const secondaryAppName = `secondary-app-${Date.now()}`;
+      secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+      const secondaryAuth = getAuth(secondaryApp);
+
+      const fakeEmail = `${newAccountForm.phone}@scouts.app`;
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, fakeEmail, newAccountForm.password);
+      const user = userCredential.user;
+
+      const profile: ScoutProfile = {
+        uid: user.uid,
+        name: newAccountForm.name,
+        email: fakeEmail,
+        stage: newAccountForm.stage,
+        number: newAccountForm.phone,
+        badges: {
+          badge1: { name: '', progress: 0, notes: '', completedRequirements: [] },
+          badge2: { name: '', progress: 0, notes: '', completedRequirements: [] },
+          badge3: { name: '', progress: 0, notes: '', completedRequirements: [] },
+        },
+        role: newAccountForm.role,
+        isVerified: true,
+        createdAt: serverTimestamp(),
+        joinDate: serverTimestamp(),
+      };
+
+      await setDoc(doc(db, 'users', user.uid), profile);
+      await signOut(secondaryAuth);
+      
+      setMessage({ type: 'success', text: 'تم إنشاء الحساب بنجاح' });
+      setNewAccountForm({
+        name: '',
+        phone: '',
+        password: '',
+        stage: STAGES[0] as Stage,
+        role: 'scout'
+      });
+    } catch (error: any) {
+      console.error('Error creating account:', error);
+      let errorMsg = 'حدث خطأ أثناء إنشاء الحساب';
+      if (error.code === 'auth/email-already-in-use') {
+        errorMsg = 'هذا الرقم مسجل بالفعل';
+      } else if (error.code === 'auth/weak-password') {
+        errorMsg = 'كلمة المرور ضعيفة جداً';
+      }
+      setMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setCreatingAccount(false);
+    }
   };
 
   const importFromExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1574,6 +1654,98 @@ enum OperationType {
                   </div>
                 </div>
 
+                {isSuperAdmin && (
+                  <>
+                    <hr className="border-gray-100" />
+                    <div className="space-y-6">
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 bg-[#4285F4]/10 rounded-2xl text-[#4285F4]">
+                          <ShieldPlus size={24} />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-800">إنشاء حساب جديد</h3>
+                          <p className="text-sm text-gray-500">أضف مسؤولاً أو كشافاً جديداً مباشرة من هنا.</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 px-1">الاسم بالكامل</label>
+                          <input
+                            type="text"
+                            value={newAccountForm.name}
+                            onChange={(e) => setNewAccountForm(prev => ({ ...prev, name: e.target.value }))}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                            placeholder="أدخل الاسم"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 px-1">رقم الهاتف</label>
+                          <input
+                            type="tel"
+                            value={newAccountForm.phone}
+                            onChange={(e) => setNewAccountForm(prev => ({ ...prev, phone: e.target.value }))}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                            placeholder="01xxxxxxxxx"
+                            maxLength={11}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 px-1">كلمة المرور</label>
+                          <input
+                            type="password"
+                            value={newAccountForm.password}
+                            onChange={(e) => setNewAccountForm(prev => ({ ...prev, password: e.target.value }))}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                            placeholder="••••••••"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 px-1">المرحلة</label>
+                          <select
+                            value={newAccountForm.stage}
+                            onChange={(e) => setNewAccountForm(prev => ({ ...prev, stage: e.target.value as Stage }))}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold bg-white"
+                          >
+                            {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 px-1">نوع الحساب</label>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setNewAccountForm(prev => ({ ...prev, role: 'scout' }))}
+                              className={`flex-1 py-3 rounded-xl border font-bold text-sm transition-all ${newAccountForm.role === 'scout' ? 'bg-[#4285F4] text-white border-[#4285F4]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                            >
+                              كشاف
+                            </button>
+                            <button
+                              onClick={() => setNewAccountForm(prev => ({ ...prev, role: 'admin' }))}
+                              className={`flex-1 py-3 rounded-xl border font-bold text-sm transition-all ${newAccountForm.role === 'admin' ? 'bg-[#4285F4] text-white border-[#4285F4]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                            >
+                              مسؤول
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            onClick={handleCreateAccount}
+                            disabled={creatingAccount}
+                            className="w-full py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] transition-colors font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            {creatingAccount ? (
+                              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                              <Plus size={20} />
+                            )}
+                            إنشاء الحساب
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 <hr className="border-gray-100" />
 
                 <div>
@@ -1728,7 +1900,7 @@ enum OperationType {
                                      normalizeArabic(s.badges.badge2.name) === normalizedBadge || 
                                      normalizeArabic(s.badges.badge3.name) === normalizedBadge;
                     if (!hasBadge) return false;
-                    return canEditBadge(s.stage, gradingSelectedBadge, s.uid);
+                    return canEditBadge(s.stage, gradingSelectedBadge, s.uid, s.role);
                   });
 
                   // Show stage if it has scouts OR if it has requirements (for super admin or stage admin to set scores)
@@ -1856,7 +2028,7 @@ enum OperationType {
                                   const isCompleted = completedReqs.includes(req);
                                   const currentScore = scores[req];
                                   const isSelf = scout.uid === currentProfile?.uid;
-                                  const canEdit = canEditBadge(scout.stage, gradingSelectedBadge, scout.uid);
+                                  const canEdit = canEditBadge(scout.stage, gradingSelectedBadge, scout.uid, scout.role);
 
                                   return (
                                     <td key={idx} className={`p-4 border-l border-gray-200 last:border-l-0 ${isSelf ? 'bg-gray-50/50' : ''}`}>
@@ -2411,7 +2583,7 @@ enum OperationType {
                     const reqs = getScoutBadgeRequirements(badgeName, editingScout.stage);
                     const completedReqs = (badge.completedRequirements || []).filter(r => reqs.includes(r));
                     const hasReqs = reqs.length > 0;
-                    const canEdit = canEditBadge(editingScout.stage, badgeName, editingScout.uid);
+                    const canEdit = canEditBadge(editingScout.stage, badgeName, editingScout.uid, editingScout.role);
                     
                     // Badge Selection Logic
                     const scoutCategory = (badgeSettings.categories || []).find(c => c.id === 'scout');

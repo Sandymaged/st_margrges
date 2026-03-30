@@ -19,7 +19,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ScoutProfile | null>(null);
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
-    logoUrl: '/logo.png',
+    logoUrl: '/syncc.png',
     scoutGroupName: 'مجموعة مارجرجس الكشفية'
   });
   const [loading, setLoading] = useState(true);
