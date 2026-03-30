@@ -279,7 +279,8 @@ enum OperationType {
       if (docSnap.exists()) {
         const data = docSnap.data() as GeneralSettings;
         setGeneralSettings({
-          ...data,
+          logoUrl: data.logoUrl || '/logo.png',
+          scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
           allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES]
         });
       }
@@ -1543,39 +1544,72 @@ enum OperationType {
                 <p className="text-gray-500 font-bold">تحكم في إعدادات النظام العامة وصلاحيات التسجيل.</p>
               </div>
 
-              <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">المراحل المسموح لها بالتسجيل</h3>
-                <p className="text-sm text-gray-500 mb-6">اختر المراحل التي يمكنها إنشاء حسابات جديدة حالياً. المراحل غير المحددة لن تتمكن من التسجيل.</p>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {STAGES.map(stage => {
-                    const isAllowed = generalSettings.allowedRegistrationStages?.includes(stage) ?? true;
-                    return (
-                      <label key={stage} className={`flex items-center gap-3 p-4 rounded-2xl border cursor-pointer transition-all ${isAllowed ? 'border-[#4285F4] bg-[#4285F4]/5' : 'border-gray-200 hover:bg-gray-50'}`}>
-                        <input
-                          type="checkbox"
-                          checked={isAllowed}
-                          onChange={async (e) => {
-                            const currentAllowed = generalSettings.allowedRegistrationStages || [...STAGES];
-                            const newAllowed = e.target.checked
-                              ? [...currentAllowed, stage]
-                              : currentAllowed.filter(s => s !== stage);
-                            
-                            try {
-                              await setDoc(doc(db, 'settings', 'general'), {
-                                allowedRegistrationStages: newAllowed
-                              }, { merge: true });
-                            } catch (error) {
-                              console.error('Error updating allowed stages:', error);
-                              alert('حدث خطأ أثناء تحديث الإعدادات');
-                            }
-                          }}
-                          className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
-                        />
-                        <span className={`font-bold ${isAllowed ? 'text-[#4285F4]' : 'text-gray-600'}`}>{stage}</span>
-                      </label>
-                    );
-                  })}
+              <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-4">اسم المجموعة الكشفية</h3>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={generalSettings.scoutGroupName || ''}
+                      onChange={(e) => setGeneralSettings(prev => ({ ...prev, scoutGroupName: e.target.value }))}
+                      className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                      placeholder="مثال: مجموعة مارجرجس الكشفية"
+                    />
+                    <button
+                      onClick={async () => {
+                        try {
+                          await setDoc(doc(db, 'settings', 'general'), {
+                            scoutGroupName: generalSettings.scoutGroupName
+                          }, { merge: true });
+                          setMessage({ type: 'success', text: 'تم حفظ اسم المجموعة بنجاح' });
+                        } catch (error) {
+                          console.error('Error updating group name:', error);
+                          setMessage({ type: 'error', text: 'حدث خطأ أثناء حفظ اسم المجموعة' });
+                        }
+                      }}
+                      className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] transition-colors font-bold"
+                    >
+                      حفظ الاسم
+                    </button>
+                  </div>
+                </div>
+
+                <hr className="border-gray-100" />
+
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-4">المراحل المسموح لها بالتسجيل</h3>
+                  <p className="text-sm text-gray-500 mb-6">اختر المراحل التي يمكنها إنشاء حسابات جديدة حالياً. المراحل غير المحددة لن تتمكن من التسجيل.</p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {STAGES.map(stage => {
+                      const isAllowed = generalSettings.allowedRegistrationStages?.includes(stage) ?? true;
+                      return (
+                        <label key={stage} className={`flex items-center gap-3 p-4 rounded-2xl border cursor-pointer transition-all ${isAllowed ? 'border-[#4285F4] bg-[#4285F4]/5' : 'border-gray-200 hover:bg-gray-50'}`}>
+                          <input
+                            type="checkbox"
+                            checked={isAllowed}
+                            onChange={async (e) => {
+                              const currentAllowed = generalSettings.allowedRegistrationStages || [...STAGES];
+                              const newAllowed = e.target.checked
+                                ? [...currentAllowed, stage]
+                                : currentAllowed.filter(s => s !== stage);
+                              
+                              try {
+                                await setDoc(doc(db, 'settings', 'general'), {
+                                  allowedRegistrationStages: newAllowed
+                                }, { merge: true });
+                              } catch (error) {
+                                console.error('Error updating allowed stages:', error);
+                                alert('حدث خطأ أثناء تحديث الإعدادات');
+                              }
+                            }}
+                            className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                          />
+                          <span className={`font-bold ${isAllowed ? 'text-[#4285F4]' : 'text-gray-600'}`}>{stage}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>

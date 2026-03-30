@@ -41,14 +41,16 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'name', 'stage', 'number', 'badges', 'role', 'createdAt', 'email', 'isVerified', 'joinDate']) &&
+      return data.keys().hasAll(['uid', 'name', 'stage', 'number', 'badges', 'role']) &&
         data.uid is string &&
         data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
         data.stage in ['أشبال وزهرات مبتدأ', 'أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات', 'قادة وجوالة'] &&
         data.number is string && data.number.size() < 50 &&
         data.role in ['scout', 'admin'] &&
-        data.email is string &&
-        data.isVerified is bool &&
+        (!('email' in data) || data.email is string) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        (!('isVerified' in data) || data.isVerified is bool) &&
+        (!('joinDate' in data) || data.joinDate is timestamp) &&
         data.badges is map &&
         isValidBadge(data.badges.badge1) &&
         isValidBadge(data.badges.badge2) &&
@@ -59,7 +61,9 @@ service cloud.firestore {
       return badge is map &&
         badge.name is string &&
         badge.progress is number && badge.progress >= 0 && badge.progress <= 100 &&
-        (!('notes' in badge) || (badge.notes is string && badge.notes.size() < 1000));
+        (!('notes' in badge) || (badge.notes is string && badge.notes.size() < 1000)) &&
+        (!('completedRequirements' in badge) || badge.completedRequirements is list) &&
+        (!('requirementScores' in badge) || badge.requirementScores is map);
     }
 
     match /settings/{docId} {

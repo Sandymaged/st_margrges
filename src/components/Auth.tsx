@@ -276,7 +276,7 @@ export default function Auth() {
             {isCompletingProfile ? 'إكمال بيانات الملف الشخصي' : isLogin ? 'تسجيل الدخول' : 'إنشاء حساب كشاف'}
           </h2>
           <p className="text-gray-500 mt-2">
-            {isCompletingProfile ? 'يرجى إكمال بياناتك للمتابعة' : isLogin ? `أهلاً بك مجدداً في ${generalSettings.scoutGroupName}` : 'سجل بياناتك للانضمام إلينا'}
+            {isCompletingProfile ? 'يرجى إكمال بياناتك للمتابعة' : isLogin ? `أهلاً بك في ${generalSettings.scoutGroupName || 'المجموعة الكشفية'}` : 'سجل بياناتك للانضمام إلينا'}
           </p>
         </div>
 
