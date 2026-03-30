@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../firebase';
-import { initializeApp, getApp, getApps } from 'firebase/app';
+import { initializeApp, getApp, getApps, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -294,7 +294,7 @@ enum OperationType {
       if (docSnap.exists()) {
         const data = docSnap.data() as GeneralSettings;
         setGeneralSettings({
-          logoUrl: data.logoUrl || '/syncc.png',
+          logoUrl: '/syncc.png',
           scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
           allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES]
         });
@@ -430,6 +430,13 @@ enum OperationType {
       }
       setMessage({ type: 'error', text: errorMsg });
     } finally {
+      if (secondaryApp) {
+        try {
+          await deleteApp(secondaryApp);
+        } catch (e) {
+          console.error('Error deleting secondary app:', e);
+        }
+      }
       setCreatingAccount(false);
     }
   };
@@ -651,9 +658,11 @@ enum OperationType {
         progress: newProgress
       };
 
+      console.log('Updating badge for scout:', scout.uid, 'Badge:', badgeKey, 'Data:', updatedBadge);
       await updateDoc(doc(db, 'users', scout.uid), {
         [`badges.${badgeKey}`]: updatedBadge
       });
+      console.log('Badge updated successfully');
       
       setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
     } catch (error) {

@@ -29,7 +29,11 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (snapshot) => {
       if (snapshot.exists()) {
-        setGeneralSettings(snapshot.data() as GeneralSettings);
+        const data = snapshot.data() as GeneralSettings;
+        setGeneralSettings({
+          ...data,
+          logoUrl: '/syncc.png'
+        });
       }
     });
     return () => unsubscribe();
@@ -77,7 +81,7 @@ export default function App() {
           className="flex flex-col items-center gap-4"
         >
           <img 
-            src={generalSettings.logoUrl} 
+            src="/syncc.png" 
             alt="Scouts Logo" 
             className="h-24 w-24 animate-pulse object-contain"
           />

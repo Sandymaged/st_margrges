@@ -118,7 +118,11 @@ export default function Auth() {
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
       if (docSnap.exists()) {
-        setGeneralSettings(docSnap.data() as GeneralSettings);
+        const data = docSnap.data() as GeneralSettings;
+        setGeneralSettings({
+          ...data,
+          logoUrl: '/syncc.png'
+        });
       }
     });
     return () => unsubscribe();
@@ -267,7 +271,7 @@ export default function Auth() {
         <div className="text-center mb-8">
           <div className="h-20 w-20 mx-auto mb-4 bg-white rounded-full p-2 shadow-inner flex items-center justify-center overflow-hidden border border-gray-100">
             <img 
-              src={generalSettings.logoUrl} 
+              src="/syncc.png" 
               alt="Scouts Logo" 
               className="h-full w-full object-contain"
             />

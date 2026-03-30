@@ -33,37 +33,36 @@ service cloud.firestore {
       return isAuthenticated() && (
         request.auth.token.email == "begolbahaa98@gmail.com" ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.number == '01555165366' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'scout') == 'admin' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('number', '') == '01555165366' ||
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canManagePermissions', false) == true
         ))
       );
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'name', 'stage', 'number', 'badges', 'role']) &&
-        data.uid is string &&
-        data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-        data.stage in ['أشبال وزهرات مبتدأ', 'أشبال وزهرات', 'كشاف ومرشدات', 'متقدم ورائدات', 'قادة وجوالة'] &&
-        data.number is string && data.number.size() < 50 &&
-        data.role in ['scout', 'admin'] &&
-        (!('email' in data) || data.email is string) &&
-        (!('createdAt' in data) || data.createdAt is timestamp) &&
-        (!('isVerified' in data) || data.isVerified is bool) &&
-        (!('joinDate' in data) || data.joinDate is timestamp) &&
-        data.badges is map &&
-        isValidBadge(data.badges.badge1) &&
-        isValidBadge(data.badges.badge2) &&
-        isValidBadge(data.badges.badge3);
+      return (
+        (!('uid' in data) || data.uid is string) &&
+        (!('name' in data) || (data.name is string && data.name.size() > 0)) &&
+        (!('stage' in data) || data.stage is string) &&
+        (!('number' in data) || data.number is string) &&
+        (!('role' in data) || data.role in ['scout', 'admin']) &&
+        (!('badges' in data) || (
+          data.badges is map &&
+          isValidBadge(data.badges.get('badge1', {})) &&
+          isValidBadge(data.badges.get('badge2', {})) &&
+          isValidBadge(data.badges.get('badge3', {}))
+        )) &&
+        (!('permissions' in data) || data.permissions is map)
+      );
     }
 
     function isValidBadge(badge) {
       return badge is map &&
-        badge.name is string &&
-        badge.progress is number && badge.progress >= 0 && badge.progress <= 100 &&
-        (!('notes' in badge) || (badge.notes is string && badge.notes.size() < 1000)) &&
-        (!('completedRequirements' in badge) || badge.completedRequirements is list) &&
-        (!('requirementScores' in badge) || badge.requirementScores is map);
+        (!('name' in badge) || badge.name is string) &&
+        (!('progress' in badge) || (badge.progress is number && badge.progress >= 0 && badge.progress <= 100)) &&
+        (!('requirementScores' in badge) || badge.requirementScores is map) &&
+        (!('completedRequirements' in badge) || badge.completedRequirements is list);
     }
 
     match /settings/{docId} {

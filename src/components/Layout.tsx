@@ -97,7 +97,7 @@ export default function Layout({ children, user, profile, view, setView, general
               >
                 <div className="h-10 w-10 bg-white rounded-full p-1 flex items-center justify-center shadow-inner overflow-hidden">
                   <img 
-                    src={generalSettings.logoUrl} 
+                    src="/syncc.png" 
                     alt="Scouts Logo" 
                     className="h-full w-full object-contain"
                   />
@@ -106,21 +106,6 @@ export default function Layout({ children, user, profile, view, setView, general
               </button>
               {isSuperAdmin && (
                 <div className="absolute -bottom-2 -right-2 flex gap-1">
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    className="hidden" 
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                  />
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    disabled={isUpdatingLogo}
-                    className="p-1 bg-white text-[#4285F4] rounded-full shadow-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
-                    title="تغيير اللوجو"
-                  >
-                    {isUpdatingLogo ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
-                  </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleUpdateGroupName(); }}
                     className="p-1 bg-white text-[#4285F4] rounded-full shadow-lg hover:bg-blue-50 transition-colors"
