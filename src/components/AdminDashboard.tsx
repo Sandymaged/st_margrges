@@ -422,24 +422,48 @@ enum OperationType {
               hasChanges = true;
             }
           });
-          // We don't delete the old stage requirements here just in case,
-          // but we have copied them to the new stages.
         }
       });
+    });
+
+    const updatedCategories = badgeSettings.categories.map(category => {
+      if (!category.stageBadges) return category;
+      
+      let categoryChanged = false;
+      const newStageBadges = { ...category.stageBadges };
+      
+      Object.keys(oldToNewMap).forEach(oldStage => {
+        if (newStageBadges[oldStage as Stage]) {
+          const oldBadges = newStageBadges[oldStage as Stage] || [];
+          oldToNewMap[oldStage].forEach(newStage => {
+            if (!newStageBadges[newStage as Stage]) {
+              newStageBadges[newStage as Stage] = [...oldBadges];
+              categoryChanged = true;
+              hasChanges = true;
+            }
+          });
+        }
+      });
+      
+      if (categoryChanged) {
+        return { ...category, stageBadges: newStageBadges };
+      }
+      return category;
     });
 
     if (hasChanges) {
       try {
         await setDoc(doc(db, 'settings', 'badges'), {
           ...badgeSettings,
-          requirements: updatedRequirements
+          requirements: updatedRequirements,
+          categories: updatedCategories
         });
-        setMessage({ type: 'success', text: 'تم تحديث متطلبات الشارات للمراحل الجديدة بنجاح' });
+        setMessage({ type: 'success', text: 'تم تحديث متطلبات وتصنيفات الشارات للمراحل الجديدة بنجاح' });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
       }
     } else {
-      setMessage({ type: 'success', text: 'لا توجد متطلبات قديمة تحتاج للتحديث' });
+      setMessage({ type: 'success', text: 'لا توجد بيانات قديمة تحتاج للتحديث' });
     }
   };
 
