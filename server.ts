@@ -31,7 +31,7 @@ try {
     adminApp = admin.initializeApp({
       credential: admin.credential.cert(parsedAccount),
     });
-    console.log("Firebase Admin initialized successfully.");
+    console.log("Firebase Admin initialized successfully. Ready for advanced features.");
   } else {
     console.warn("FIREBASE_SERVICE_ACCOUNT not found. Admin features will be disabled.");
   }
