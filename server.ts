@@ -56,6 +56,13 @@ async function startServer() {
     res.json({ status: "pong", timestamp: new Date().toISOString() });
   });
 
+  app.get("/api/admin/status", (req, res) => {
+    res.json({ 
+      initialized: !!adminApp,
+      envSet: !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
+    });
+  });
+
   // API Routes
   app.post(["/api/admin/delete-user", "/api/admin/delete-user/"], async (req, res) => {
     console.log("Received delete-user request:", req.body.phone || req.body.uid);
@@ -146,6 +153,42 @@ async function startServer() {
     } catch (error: any) {
       console.error("Error deleting user:", error);
       res.status(500).json({ error: error.message || "Failed to delete user." });
+    }
+  });
+
+  app.post(["/api/admin/update-password", "/api/admin/update-password/"], async (req, res) => {
+    console.log("Received update-password request:", req.body.uid);
+    if (!adminApp) {
+      console.error("Admin SDK not initialized");
+      return res.status(500).json({ error: "Firebase Admin not initialized. Check server logs for details." });
+    }
+
+    const { uid, newPassword, adminToken } = req.body;
+
+    if (!uid || !newPassword) {
+      return res.status(400).json({ error: "UID and newPassword are required." });
+    }
+
+    try {
+      // Verify the requester is an admin
+      const decodedToken = await admin.auth().verifyIdToken(adminToken);
+      
+      // Check if the requester is the super admin
+      const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || decodedToken.email === '01555165366@scouts.local' || decodedToken.phone_number === '+201555165366';
+      
+      if (!isSuperAdmin) {
+        return res.status(403).json({ error: "Unauthorized. Only super admins can change passwords." });
+      }
+
+      await admin.auth().updateUser(uid, {
+        password: newPassword
+      });
+
+      return res.json({ message: "Successfully updated user password." });
+
+    } catch (error: any) {
+      console.error("Error updating password:", error);
+      res.status(500).json({ error: error.message || "Failed to update password." });
     }
   });
 

@@ -14,7 +14,8 @@ import {
   DEFAULT_CATEGORIES, 
   BADGE_LABELS,
   BadgeProgress,
-  PHONE_REGEX
+  PHONE_REGEX,
+  GeneralSettings
 } from '../types';
 import { 
   Search, 
@@ -55,6 +56,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [activeTab, setActiveTab] = useState<'scouts' | 'settings' | 'grading'>('scouts');
   const [gradingSelectedBadge, setGradingSelectedBadge] = useState<string>('');
   const [gradingSearchTerm, setGradingSearchTerm] = useState<string>('');
+  const [gradingStageFilter, setGradingStageFilter] = useState<Stage | 'all'>('all');
   const [activeBadgeTab, setActiveBadgeTab] = useState<'badge1' | 'badge2' | 'badge3'>('badge1');
   const [scouts, setScouts] = useState<ScoutProfile[]>([]);
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
@@ -76,7 +78,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
   const [selectedStageForNewBadge, setSelectedStageForNewBadge] = useState<Stage | 'all'>('all');
-  const [selectedStageForNewReq, setSelectedStageForNewReq] = useState<Stage | 'all'>('all');
+  const [selectedStageForNewReq, setSelectedStageForNewReq] = useState<Stage[] | 'all'>('all');
   const [selectedCategoryForBadgeSelection, setSelectedCategoryForBadgeSelection] = useState<Record<'badge1' | 'badge2' | 'badge3', string | null>>({
     badge1: 'scout',
     badge2: null,
@@ -126,6 +128,10 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     role: 'scout' as 'scout' | 'admin'
   });
   const [creatingAccount, setCreatingAccount] = useState(false);
+  const [changingPasswordFor, setChangingPasswordFor] = useState<ScoutProfile | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [adminStatus, setAdminStatus] = useState<{ initialized: boolean; envSet: boolean } | null>(null);
 
 enum OperationType {
   GET = 'get',
@@ -135,6 +141,20 @@ enum OperationType {
   DELETE = 'delete',
   WRITE = 'write'
 }
+
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      try {
+        const res = await fetch('/api/admin/status');
+        const data = await res.json();
+        setAdminStatus(data);
+      } catch (e) {
+        console.error('Error checking admin status:', e);
+        setAdminStatus({ initialized: false, envSet: false });
+      }
+    };
+    checkAdminStatus();
+  }, []);
 
   const isSuperAdmin = currentProfile?.number === '01555165366' || currentProfile?.email === 'begolbahaa98@gmail.com' || currentProfile?.permissions?.canManagePermissions;
 
@@ -367,6 +387,54 @@ enum OperationType {
     });
 
     XLSX.writeFile(workbook, `تقييم_${gradingSelectedBadge}_${new Date().toLocaleDateString()}.xlsx`);
+  };
+
+  const migrateOldStages = async () => {
+    if (!isSuperAdmin) return;
+    
+    const oldToNewMap: Record<string, Stage[]> = {
+      'أشبال وزهرات مبتدأ': ['أشبال مبتدأ', 'زهرات مبتدأ'],
+      'أشبال وزهرات': ['أشبال', 'زهرات'],
+      'كشاف ومرشدات': ['كشاف', 'مرشدات'],
+      'متقدم ورائدات': ['متقدم', 'رائدات'],
+      'جوالة وقادة': ['جوالة', 'قادة']
+    };
+
+    let hasChanges = false;
+    const updatedRequirements = { ...badgeSettings.requirements };
+
+    Object.keys(updatedRequirements).forEach(badgeName => {
+      const reqs = updatedRequirements[badgeName];
+      if (!reqs || Array.isArray(reqs)) return;
+
+      Object.keys(oldToNewMap).forEach(oldStage => {
+        if (reqs[oldStage as Stage]) {
+          const oldReqs = reqs[oldStage as Stage] || [];
+          oldToNewMap[oldStage].forEach(newStage => {
+            if (!reqs[newStage as Stage]) {
+              reqs[newStage as Stage] = [...oldReqs];
+              hasChanges = true;
+            }
+          });
+          // We don't delete the old stage requirements here just in case,
+          // but we have copied them to the new stages.
+        }
+      });
+    });
+
+    if (hasChanges) {
+      try {
+        await setDoc(doc(db, 'settings', 'badges'), {
+          ...badgeSettings,
+          requirements: updatedRequirements
+        });
+        setMessage({ type: 'success', text: 'تم تحديث متطلبات الشارات للمراحل الجديدة بنجاح' });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      }
+    } else {
+      setMessage({ type: 'success', text: 'لا توجد متطلبات قديمة تحتاج للتحديث' });
+    }
   };
 
   const handleCreateAccount = async () => {
@@ -764,7 +832,7 @@ enum OperationType {
     }
   };
 
-  const handleAddRequirement = async (badgeName: string, req: string, stage: Stage | 'all' = 'all', category: string = 'عام') => {
+  const handleAddRequirement = async (badgeName: string, req: string, stages: Stage[] | 'all' = 'all', category: string = 'عام') => {
     if (!badgeName || !req.trim()) return;
     
     const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
@@ -776,7 +844,13 @@ enum OperationType {
       newBadgeReqs = { ...currentBadgeReqs };
     }
     
-    newBadgeReqs[stage] = [...(newBadgeReqs[stage] || []), req.trim()];
+    if (stages === 'all') {
+      newBadgeReqs['all'] = [...(newBadgeReqs['all'] || []), req.trim()];
+    } else {
+      stages.forEach(stage => {
+        newBadgeReqs[stage] = [...(newBadgeReqs[stage] || []), req.trim()];
+      });
+    }
 
     const updatedRequirements = {
       ...(badgeSettings.requirements || {}),
@@ -1138,6 +1212,47 @@ enum OperationType {
     }
   };
 
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isSuperAdmin || !changingPasswordFor || !newPassword) return;
+
+    if (newPassword.length < 6) {
+      setMessage({ type: 'error', text: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('User not authenticated');
+      
+      const adminToken = await user.getIdToken();
+      const response = await fetch('/api/admin/update-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          uid: changingPasswordFor.uid, 
+          newPassword, 
+          adminToken 
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update password');
+      }
+
+      setMessage({ type: 'success', text: 'تم تحديث كلمة المرور بنجاح' });
+      setChangingPasswordFor(null);
+      setNewPassword('');
+    } catch (error: any) {
+      console.error('Error updating password:', error);
+      setMessage({ type: 'error', text: `حدث خطأ: ${error.message}` });
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1426,18 +1541,18 @@ enum OperationType {
                           <div className="space-y-4">
                             {getReqsForStage(selectedBadgeForReq, 'all').length > 0 ? (
                               Object.entries(
-                                getReqsForStage(selectedBadgeForReq, 'all').reduce((acc, req) => {
+                                getReqsForStage(selectedBadgeForReq, 'all').reduce((acc: Record<string, string[]>, req: string) => {
                                   const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
                                   if (!acc[category]) acc[category] = [];
                                   acc[category].push(req);
                                   return acc;
-                                }, {} as Record<string, string[]>)
+                                }, {})
                               ).map(([category, reqs]) => (
                                 <div key={category} className="space-y-2">
                                   <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
                                     {category} :-
                                   </h5>
-                                  {reqs.map((req, idx) => (
+                                  {(reqs as string[]).map((req, idx) => (
                                     <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
                                       <span className="font-bold text-gray-700 text-sm flex-1">
                                         {req}
@@ -1483,18 +1598,18 @@ enum OperationType {
                             <div className="space-y-4">
                               {getReqsForStage(selectedBadgeForReq, stage).length > 0 ? (
                                 Object.entries(
-                                  getReqsForStage(selectedBadgeForReq, stage).reduce((acc, req) => {
+                                  getReqsForStage(selectedBadgeForReq, stage).reduce((acc: Record<string, string[]>, req: string) => {
                                     const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
                                     if (!acc[category]) acc[category] = [];
                                     acc[category].push(req);
                                     return acc;
-                                  }, {} as Record<string, string[]>)
+                                  }, {})
                                 ).map(([category, reqs]) => (
                                   <div key={category} className="space-y-2">
                                     <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
                                       {category} :-
                                     </h5>
-                                    {reqs.map((req, idx) => (
+                                    {(reqs as string[]).map((req, idx) => (
                                       <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
                                         <span className="font-bold text-gray-700 text-sm flex-1">
                                           {req}
@@ -1533,15 +1648,49 @@ enum OperationType {
                       </div>
 
                       <div className="space-y-3 pt-6 border-t border-gray-200">
-                        <div className="flex gap-2">
-                          <select
-                            value={selectedStageForNewReq}
-                            onChange={(e) => setSelectedStageForNewReq(e.target.value as Stage | 'all')}
-                            className="flex-1 px-4 py-2 rounded-xl border border-gray-200 outline-none text-xs font-bold bg-white"
-                          >
-                            <option value="all">لكل المراحل</option>
-                            {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500">اختر المراحل:</label>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedStageForNewReq('all')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                selectedStageForNewReq === 'all'
+                                  ? 'bg-[#4285F4] text-white'
+                                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              }`}
+                            >
+                              الكل
+                            </button>
+                            {STAGES.map(s => {
+                              const isSelected = selectedStageForNewReq !== 'all' && selectedStageForNewReq.includes(s);
+                              return (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() => {
+                                    if (selectedStageForNewReq === 'all') {
+                                      setSelectedStageForNewReq([s]);
+                                    } else {
+                                      if (isSelected) {
+                                        const newSelection = selectedStageForNewReq.filter(st => st !== s);
+                                        setSelectedStageForNewReq(newSelection.length > 0 ? newSelection : 'all');
+                                      } else {
+                                        setSelectedStageForNewReq([...selectedStageForNewReq, s]);
+                                      }
+                                    }
+                                  }}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                    isSelected
+                                      ? 'bg-[#4285F4] text-white'
+                                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                  }`}
+                                >
+                                  {s}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-2">
                           <input
@@ -1622,6 +1771,27 @@ enum OperationType {
                           <span>حذف نهائي من النظام</span>
                         </>
                       )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 p-8 rounded-[2.5rem] border border-blue-100 mt-6">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="p-3 bg-blue-100 rounded-2xl text-blue-600 shadow-sm">
+                      <ShieldCheck size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-blue-800">تحديث بيانات المراحل القديمة</h3>
+                      <p className="text-sm text-blue-600 font-bold opacity-80">استخدم هذا الخيار لنقل متطلبات الشارات من المراحل المدمجة القديمة (مثل أشبال وزهرات مبتدأ) إلى المراحل المنفصلة الجديدة.</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={migrateOldStages}
+                      className="px-8 py-4 bg-blue-600 text-white font-black rounded-2xl hover:bg-blue-700 transition-all flex items-center justify-center gap-3 shadow-lg shadow-blue-200 active:scale-[0.98]"
+                    >
+                      <Save size={20} />
+                      <span>تحديث البيانات</span>
                     </button>
                   </div>
                 </div>
@@ -1858,40 +2028,67 @@ enum OperationType {
               </select>
 
               {gradingSelectedBadge && (
-                <div className="flex flex-wrap gap-2 w-full md:w-auto">
-                  <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-2xl p-1 w-full md:w-auto overflow-x-auto scrollbar-hide">
+                <div className="flex flex-col gap-4 w-full">
+                  <div className="flex flex-wrap gap-2 w-full">
+                    <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-2xl p-1 w-full md:w-auto overflow-x-auto scrollbar-hide">
+                      <button
+                        onClick={() => setBadgePassFilter('all')}
+                        className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${badgePassFilter === 'all' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        الكل
+                      </button>
+                      <button
+                        onClick={() => setBadgePassFilter('passed')}
+                        className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${badgePassFilter === 'passed' ? 'bg-green-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        اجتاز
+                      </button>
+                      <button
+                        onClick={() => setBadgePassFilter('failed')}
+                        className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${badgePassFilter === 'failed' ? 'bg-red-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        لم يجتز
+                      </button>
+                    </div>
                     <button
-                      onClick={() => setBadgePassFilter('all')}
-                      className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${badgePassFilter === 'all' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                      onClick={exportGradingToExcel}
+                      className="flex items-center gap-2 px-4 py-3 rounded-2xl border bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-all font-bold text-sm"
+                      title="تصدير للتقييم الحالي"
                     >
-                      الكل
+                      <Download size={16} />
+                      <span className="hidden lg:inline">تصدير Excel</span>
                     </button>
-                    <button
-                      onClick={() => setBadgePassFilter('passed')}
-                      className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${badgePassFilter === 'passed' ? 'bg-green-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                    >
-                      اجتاز
-                    </button>
-                    <button
-                      onClick={() => setBadgePassFilter('failed')}
-                      className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${badgePassFilter === 'failed' ? 'bg-red-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                    >
-                      لم يجتز
-                    </button>
+                    <label className="flex items-center gap-2 px-4 py-3 rounded-2xl border bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-all font-bold text-sm cursor-pointer">
+                      <Plus size={16} />
+                      <span className="hidden lg:inline">استيراد Excel</span>
+                      <input type="file" accept=".xlsx, .xls" onChange={importFromExcel} className="hidden" />
+                    </label>
                   </div>
-                  <button
-                    onClick={exportGradingToExcel}
-                    className="flex items-center gap-2 px-4 py-3 rounded-2xl border bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-all font-bold text-sm"
-                    title="تصدير للتقييم الحالي"
-                  >
-                    <Download size={16} />
-                    <span className="hidden lg:inline">تصدير Excel</span>
-                  </button>
-                  <label className="flex items-center gap-2 px-4 py-3 rounded-2xl border bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-all font-bold text-sm cursor-pointer">
-                    <Plus size={16} />
-                    <span className="hidden lg:inline">استيراد Excel</span>
-                    <input type="file" accept=".xlsx, .xls" onChange={importFromExcel} className="hidden" />
-                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setGradingStageFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        gradingStageFilter === 'all'
+                          ? 'bg-[#4285F4] text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      كل المراحل
+                    </button>
+                    {STAGES.map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setGradingStageFilter(s)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          gradingStageFilter === s
+                            ? 'bg-[#4285F4] text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1901,6 +2098,8 @@ enum OperationType {
             <div className="space-y-8">
               {(() => {
                 const renderedStages = STAGES.map(stage => {
+                  if (gradingStageFilter !== 'all' && gradingStageFilter !== stage) return null;
+
                   const stageReqs = getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage);
                   const stageScoutsWithBadge = scouts.filter(s => {
                     if (s.stage !== stage) return false;
@@ -2157,7 +2356,22 @@ enum OperationType {
         </div>
       ) : (
         <>
-          {/* Stats Summary */}
+          {/* Admin SDK Warning */}
+      {isSuperAdmin && adminStatus?.initialized === false && (
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-3xl flex items-start gap-3 mb-6">
+          <ShieldAlert className="text-amber-500 shrink-0 mt-0.5" size={20} />
+          <div className="space-y-1">
+            <h4 className="text-sm font-black text-amber-900">تنبيه: ميزات الإدارة المتقدمة غير مفعلة</h4>
+            <p className="text-xs text-amber-800 font-bold leading-relaxed">
+              {adminStatus.envSet 
+                ? "تم العثور على متغير البيئة FIREBASE_SERVICE_ACCOUNT ولكن فشل تهيئة Admin SDK. تأكد من أن محتوى JSON صحيح وكامل."
+                : "لم يتم العثور على متغير البيئة FIREBASE_SERVICE_ACCOUNT. ميزات مثل 'الحذف النهائي للحساب' و 'تغيير كلمة المرور' لن تعمل حتى يتم إضافة مفتاح الخدمة (Service Account) في إعدادات المشروع."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Stats Summary */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center gap-4">
               <div className="bg-[#4285F4]/10 p-3 rounded-2xl">
@@ -2458,6 +2672,77 @@ enum OperationType {
         )}
       </AnimatePresence>
 
+      {/* Password Change Modal */}
+      <AnimatePresence>
+        {changingPasswordFor && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !passwordLoading && setChangingPasswordFor(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <ShieldCheck size={32} />
+                </div>
+                <h3 className="text-2xl font-bold text-center text-gray-900 mb-2">تغيير كلمة المرور</h3>
+                <p className="text-center text-gray-500 mb-8">
+                  أدخل كلمة المرور الجديدة للمستخدم <span className="font-bold text-gray-900">"{changingPasswordFor.name}"</span>
+                </p>
+                
+                <form onSubmit={handleUpdatePassword} className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-gray-500 mr-2">كلمة المرور الجديدة:</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="6 أحرف على الأقل"
+                      className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-bold"
+                    />
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setChangingPasswordFor(null)}
+                      disabled={passwordLoading}
+                      className="flex-1 py-4 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all disabled:opacity-50"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={passwordLoading}
+                      className="flex-1 py-4 bg-[#4285F4] text-white rounded-2xl font-bold hover:bg-blue-600 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {passwordLoading ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <Save size={18} />
+                          <span>تحديث</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
         {deletingScout && (
@@ -2573,11 +2858,21 @@ enum OperationType {
                     </select>
                   </div>
 
-                  <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-start gap-3">
-                    <ShieldAlert className="text-amber-500 shrink-0 mt-0.5" size={18} />
-                    <div className="text-xs text-amber-800 font-bold leading-relaxed">
-                      لتغيير كلمة المرور لهذا المستخدم، يرجى التواصل مع المسؤول التقني أو حذف الحساب وإعادة إنشائه بكلمة مرور جديدة، حيث لا يمكن تغيير كلمة مرور مستخدم آخر مباشرة لأسباب أمنية.
+                  <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex flex-col gap-4">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="text-blue-500 shrink-0 mt-0.5" size={18} />
+                      <div className="text-xs text-blue-800 font-bold leading-relaxed">
+                        بصفتك مسؤولاً كبيراً، يمكنك الآن تغيير كلمة مرور هذا المستخدم مباشرة.
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setChangingPasswordFor(editingScout)}
+                      className="w-full py-2.5 bg-white border border-blue-200 text-blue-600 rounded-xl text-xs font-black hover:bg-blue-50 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Save size={14} />
+                      تغيير كلمة المرور
+                    </button>
                   </div>
                 </div>
 
@@ -2723,18 +3018,18 @@ enum OperationType {
                               <div className="space-y-4 bg-white p-4 rounded-2xl border border-gray-100">
                                 <h5 className="text-sm font-bold text-gray-700 mb-3">متطلبات الشارة:</h5>
                                 {Object.entries(
-                                  reqs.reduce((acc, req) => {
+                                  reqs.reduce((acc: Record<string, string[]>, req: string) => {
                                     const category = badgeSettings.requirementCategories?.[badge.name]?.[req] || 'عام';
                                     if (!acc[category]) acc[category] = [];
                                     acc[category].push(req);
                                     return acc;
-                                  }, {} as Record<string, string[]>)
+                                  }, {})
                                 ).map(([category, categoryReqs]) => (
                                   <div key={category} className="space-y-2">
                                     <h6 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
                                       {category} :-
                                     </h6>
-                                    {categoryReqs.map((req, idx) => {
+                                    {(categoryReqs as string[]).map((req, idx) => {
                                       const maxScore = badgeSettings.requirementMaxScores?.[badge.name]?.[req] || 0;
                                       const isCompleted = completedReqs.includes(req);
                                       const currentScore = badge.requirementScores?.[req] || 0;
