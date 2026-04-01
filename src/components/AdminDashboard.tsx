@@ -136,6 +136,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     envSet: boolean; 
     envKey?: string | null;
     error?: string | null;
+    availableKeys?: string[];
   } | null>(null);
 
 enum OperationType {
@@ -2373,7 +2374,24 @@ enum OperationType {
               ) : null}
               {adminStatus.envSet 
                 ? `تم العثور على متغير البيئة ${adminStatus.envKey || 'FIREBASE_SERVICE_ACCOUNT'} ولكن فشل تهيئة Admin SDK. تأكد من أن محتوى JSON صحيح وكامل.`
-                : "لم يتم العثور على متغير البيئة FIREBASE_SERVICE_ACCOUNT. ميزات مثل 'الحذف النهائي للحساب' و 'تغيير كلمة المرور' لن تعمل حتى يتم إضافة مفتاح الخدمة (Service Account) في إعدادات المشروع."}
+                : (
+                  <>
+                    لم يتم العثور على متغير البيئة FIREBASE_SERVICE_ACCOUNT. ميزات مثل 'الحذف النهائي للحساب' و 'تغيير كلمة المرور' لن تعمل حتى يتم إضافة مفتاح الخدمة (Service Account) في إعدادات المشروع.
+                    <p className="mt-1 text-[10px] font-bold text-amber-700 italic">
+                      * ملاحظة: إذا قمت بإضافة المتغير للتو، قد تحتاج لإعادة تشغيل الخادم أو تحديث الصفحة بعد دقيقة.
+                    </p>
+                    {adminStatus.availableKeys && adminStatus.availableKeys.length > 0 && (
+                      <div className="mt-2 p-2 bg-amber-100/50 rounded-xl border border-amber-200/50">
+                        <p className="font-bold mb-1">المتغيرات المتاحة حالياً:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {adminStatus.availableKeys.map(key => (
+                            <code key={key} className="px-1.5 py-0.5 bg-white/50 rounded text-[10px] border border-amber-300/30">{key}</code>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
             </p>
           </div>
         </div>

@@ -2,7 +2,6 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import admin from "firebase-admin";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -10,38 +9,12 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase Admin
-let adminApp: admin.app.App | null = null;
-let initError: string | null = null;
-try {
-  const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  if (serviceAccountRaw) {
-    let parsedAccount;
-    try {
-      parsedAccount = JSON.parse(serviceAccountRaw);
-    } catch (e) {
-      // Try to fix common JSON issues like unescaped newlines in private_key
-      try {
-        const fixed = serviceAccountRaw.replace(/\n/g, '\\n');
-        parsedAccount = JSON.parse(fixed);
-      } catch (e2) {
-        initError = 'Failed to parse FIREBASE_SERVICE_ACCOUNT. Ensure it is a valid JSON string.';
-        throw new Error(initError);
-      }
-    }
+import { initAdmin, admin } from "./api/admin/lib/admin.js";
 
-    adminApp = admin.initializeApp({
-      credential: admin.credential.cert(parsedAccount),
-    });
-    console.log("Firebase Admin initialized successfully. Ready for advanced features.");
-  } else {
-    initError = "FIREBASE_SERVICE_ACCOUNT not found. Admin features will be disabled.";
-    console.warn(initError);
-  }
-} catch (error: any) {
-  initError = error.message || String(error);
-  console.error("Error initializing Firebase Admin:", error);
-}
+// Initialize Firebase Admin
+const status = initAdmin();
+const adminApp = (status.initialized && admin && typeof admin.app === 'function') ? admin.app() : null;
+const initError = status.error;
 
 async function startServer() {
   const app = express();
@@ -61,12 +34,7 @@ async function startServer() {
   });
 
   app.get("/api/admin/status", (req, res) => {
-    res.json({ 
-      initialized: !!adminApp,
-      envSet: !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY),
-      envKey: process.env.FIREBASE_SERVICE_ACCOUNT ? 'FIREBASE_SERVICE_ACCOUNT' : (process.env.FIREBASE_SERVICE_ACCOUNT_KEY ? 'FIREBASE_SERVICE_ACCOUNT_KEY' : null),
-      error: initError
-    });
+    res.json(status);
   });
 
   // API Routes

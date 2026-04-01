@@ -1,5 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { initAdmin, admin } from './lib/admin';
+import { initAdmin, admin } from './lib/admin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const status = initAdmin();
