@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
 let adminApp: admin.app.App | null = null;
+let initError: string | null = null;
 try {
   const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (serviceAccountRaw) {
@@ -24,7 +25,8 @@ try {
         const fixed = serviceAccountRaw.replace(/\n/g, '\\n');
         parsedAccount = JSON.parse(fixed);
       } catch (e2) {
-        throw new Error('Failed to parse FIREBASE_SERVICE_ACCOUNT. Ensure it is a valid JSON string.');
+        initError = 'Failed to parse FIREBASE_SERVICE_ACCOUNT. Ensure it is a valid JSON string.';
+        throw new Error(initError);
       }
     }
 
@@ -33,9 +35,11 @@ try {
     });
     console.log("Firebase Admin initialized successfully. Ready for advanced features.");
   } else {
-    console.warn("FIREBASE_SERVICE_ACCOUNT not found. Admin features will be disabled.");
+    initError = "FIREBASE_SERVICE_ACCOUNT not found. Admin features will be disabled.";
+    console.warn(initError);
   }
-} catch (error) {
+} catch (error: any) {
+  initError = error.message || String(error);
   console.error("Error initializing Firebase Admin:", error);
 }
 
@@ -59,7 +63,9 @@ async function startServer() {
   app.get("/api/admin/status", (req, res) => {
     res.json({ 
       initialized: !!adminApp,
-      envSet: !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
+      envSet: !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_KEY),
+      envKey: process.env.FIREBASE_SERVICE_ACCOUNT ? 'FIREBASE_SERVICE_ACCOUNT' : (process.env.FIREBASE_SERVICE_ACCOUNT_KEY ? 'FIREBASE_SERVICE_ACCOUNT_KEY' : null),
+      error: initError
     });
   });
 

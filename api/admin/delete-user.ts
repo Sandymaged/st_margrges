@@ -1,40 +1,8 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import * as admin from 'firebase-admin';
-
-// Initialize Firebase Admin if not already initialized
-if (!admin.apps.length) {
-  try {
-    let serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.FIREBASE_SERVICE_ACCOUNT;
-    
-    if (!serviceAccountRaw) {
-      console.error('FIREBASE_SERVICE_ACCOUNT_KEY not found in environment variables');
-    } else {
-      // Handle potential formatting issues (e.g. literal newlines)
-      let serviceAccount;
-      try {
-        serviceAccount = JSON.parse(serviceAccountRaw);
-      } catch (e) {
-        // Try to fix common JSON issues like unescaped newlines in private_key
-        try {
-          // If it's not valid JSON, maybe it's because of unescaped newlines
-          const fixed = serviceAccountRaw.replace(/\n/g, '\\n');
-          serviceAccount = JSON.parse(fixed);
-        } catch (e2) {
-          throw new Error('Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY. Ensure it is a valid JSON string.');
-        }
-      }
-
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-      });
-      console.log('Firebase Admin initialized successfully in Vercel function');
-    }
-  } catch (error) {
-    console.error('Firebase Admin initialization error:', error);
-  }
-}
+import { initAdmin, admin } from './lib/admin';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const status = initAdmin();
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -53,21 +21,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!admin.apps.length) {
-    return res.status(500).json({ error: 'Firebase Admin not initialized. Please set FIREBASE_SERVICE_ACCOUNT_KEY environment variable.' });
-  }
-
-  const { uid, phone, adminToken } = req.body;
-
-  if (!adminToken) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  if (!uid && !phone) {
-    return res.status(400).json({ error: 'UID or Phone is required.' });
+  if (!status.initialized) {
+    return res.status(500).json({ error: "Firebase Admin not initialized. " + (status.error || "") });
   }
 
   try {
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch (e) {
+        console.error("Failed to parse req.body:", e);
+      }
+    }
+    const { uid, phone, adminToken } = body;
+
+    if (!adminToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!uid && !phone) {
+      return res.status(400).json({ error: 'UID or Phone is required.' });
+    }
+
     // Verify admin token
     const decodedToken = await admin.auth().verifyIdToken(adminToken);
     

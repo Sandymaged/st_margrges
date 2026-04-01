@@ -131,7 +131,12 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [changingPasswordFor, setChangingPasswordFor] = useState<ScoutProfile | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
-  const [adminStatus, setAdminStatus] = useState<{ initialized: boolean; envSet: boolean } | null>(null);
+  const [adminStatus, setAdminStatus] = useState<{ 
+    initialized: boolean; 
+    envSet: boolean; 
+    envKey?: string | null;
+    error?: string | null;
+  } | null>(null);
 
 enum OperationType {
   GET = 'get',
@@ -2363,8 +2368,11 @@ enum OperationType {
           <div className="space-y-1">
             <h4 className="text-sm font-black text-amber-900">تنبيه: ميزات الإدارة المتقدمة غير مفعلة</h4>
             <p className="text-xs text-amber-800 font-bold leading-relaxed">
+              {adminStatus.error ? (
+                <span className="block mb-1">خطأ: {adminStatus.error}</span>
+              ) : null}
               {adminStatus.envSet 
-                ? "تم العثور على متغير البيئة FIREBASE_SERVICE_ACCOUNT ولكن فشل تهيئة Admin SDK. تأكد من أن محتوى JSON صحيح وكامل."
+                ? `تم العثور على متغير البيئة ${adminStatus.envKey || 'FIREBASE_SERVICE_ACCOUNT'} ولكن فشل تهيئة Admin SDK. تأكد من أن محتوى JSON صحيح وكامل.`
                 : "لم يتم العثور على متغير البيئة FIREBASE_SERVICE_ACCOUNT. ميزات مثل 'الحذف النهائي للحساب' و 'تغيير كلمة المرور' لن تعمل حتى يتم إضافة مفتاح الخدمة (Service Account) في إعدادات المشروع."}
             </p>
           </div>
