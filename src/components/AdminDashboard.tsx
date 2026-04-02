@@ -68,17 +68,23 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
     logoUrl: '/syncc.png',
     scoutGroupName: 'مجموعة مارجرجس الكشفية',
-    allowedRegistrationStages: [...STAGES]
+    allowedRegistrationStages: [...STAGES],
+    badgePrice: 30,
+    attendanceDates: []
   });
   const [selectedBadgeForReq, setSelectedBadgeForReq] = useState<string>('');
   const [newRequirementInput, setNewRequirementInput] = useState('');
   const [newRequirementCategory, setNewRequirementCategory] = useState('');
-  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general'>('categories');
+  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance'>('categories');
   const [selectedCategoryForEdit, setSelectedCategoryForEdit] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
   const [selectedStageForNewBadge, setSelectedStageForNewBadge] = useState<Stage | 'all'>('all');
   const [selectedStageForNewReq, setSelectedStageForNewReq] = useState<Stage[] | 'all'>('all');
+  const [newAttendanceDate, setNewAttendanceDate] = useState('');
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
+  const [attendanceStageFilter, setAttendanceStageFilter] = useState<Stage | 'all'>('all');
+  const [attendanceBadgeCountFilter, setAttendanceBadgeCountFilter] = useState<'all' | '1' | '2' | '3'>('all');
   const [selectedCategoryForBadgeSelection, setSelectedCategoryForBadgeSelection] = useState<Record<'badge1' | 'badge2' | 'badge3', string | null>>({
     badge1: 'scout',
     badge2: null,
@@ -169,6 +175,8 @@ enum OperationType {
       canManagePermissions: true,
       canManageAllBadges: true,
       canDeleteAccounts: true,
+      canManageAttendance: true,
+      canManagePayments: true,
       managedStages: [...STAGES],
       managedBadges: Array.from(new Set((badgeSettings.categories || []).flatMap(c => [
         ...(c.badges || []),
@@ -182,6 +190,8 @@ enum OperationType {
       canManagePermissions: false,
       canManageAllBadges: false,
       canDeleteAccounts: false,
+      canManageAttendance: false,
+      canManagePayments: false,
       managedStages: [],
       managedBadges: []
     });
@@ -189,6 +199,8 @@ enum OperationType {
   
   const canManageAllBadges = isSuperAdmin || currentProfile?.permissions?.canManageAllBadges;
   const canDeleteAccounts = isSuperAdmin || currentProfile?.permissions?.canDeleteAccounts;
+  const canManageAttendance = isSuperAdmin || currentProfile?.permissions?.canManageAttendance;
+  const canManagePayments = isSuperAdmin || currentProfile?.permissions?.canManagePayments;
   
   const canDeleteThisScout = (scout: ScoutProfile) => {
     if (scout.uid === currentProfile?.uid) return false;
@@ -322,7 +334,9 @@ enum OperationType {
         setGeneralSettings({
           logoUrl: '/syncc.png',
           scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
-          allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES]
+          allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES],
+          badgePrice: data.badgePrice || 30,
+          attendanceDates: data.attendanceDates || []
         });
       }
     });
@@ -1353,6 +1367,12 @@ enum OperationType {
             >
               إعدادات عامة
             </button>
+            <button
+              onClick={() => setSettingsTab('attendance')}
+              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'attendance' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              الغياب والاشتراك
+            </button>
             {canDeleteAccounts && (
               <button
                 onClick={() => setSettingsTab('cleanup')}
@@ -1991,6 +2011,204 @@ enum OperationType {
                       );
                     })}
                   </div>
+                </div>
+              </div>
+            </div>
+          ) : settingsTab === 'attendance' ? (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 mb-2">الغياب والاشتراك</h2>
+                <p className="text-gray-500 font-bold">إدارة غياب الأفراد والاشتراكات المالية.</p>
+              </div>
+
+              {isSuperAdmin && (
+                <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 space-y-4">
+                  <h3 className="text-xl font-bold text-gray-800 mb-4">إعدادات الاشتراك</h3>
+                  <div className="flex gap-4 items-center">
+                    <label className="font-bold text-gray-700 whitespace-nowrap">سعر الشارة الواحدة:</label>
+                    <input
+                      type="number"
+                      value={generalSettings.badgePrice || 30}
+                      onChange={async (e) => {
+                        const newPrice = Number(e.target.value);
+                        setGeneralSettings(prev => ({ ...prev, badgePrice: newPrice }));
+                        try {
+                          await setDoc(doc(db, 'settings', 'general'), { badgePrice: newPrice }, { merge: true });
+                        } catch (error) {
+                          handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                        }
+                      }}
+                      className="w-32 px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold"
+                    />
+                    <span className="font-bold text-gray-500">جنيه</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 space-y-4">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+                  <h3 className="text-xl font-bold text-gray-800">سجل الغياب والاشتراكات</h3>
+                  {isSuperAdmin && (
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={newAttendanceDate}
+                        onChange={(e) => setNewAttendanceDate(e.target.value)}
+                        className="px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!newAttendanceDate) return;
+                          const dates = generalSettings.attendanceDates || [];
+                          if (dates.includes(newAttendanceDate)) {
+                            setMessage({ type: 'error', text: 'هذا التاريخ مضاف بالفعل' });
+                            return;
+                          }
+                          const newDates = [...dates, newAttendanceDate].sort();
+                          try {
+                            await setDoc(doc(db, 'settings', 'general'), { attendanceDates: newDates }, { merge: true });
+                            setNewAttendanceDate('');
+                          } catch (error) {
+                            handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                          }
+                        }}
+                        className="px-4 py-2 bg-[#4285F4] text-white font-bold rounded-xl hover:bg-blue-600 transition-all"
+                      >
+                        إضافة يوم أخر
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Filters */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className="relative">
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                    <input
+                      type="text"
+                      placeholder="بحث بالاسم..."
+                      value={attendanceSearchQuery}
+                      onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                      className="w-full pl-4 pr-10 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none"
+                    />
+                  </div>
+                  <select
+                    value={attendanceStageFilter}
+                    onChange={(e) => setAttendanceStageFilter(e.target.value as Stage | 'all')}
+                    className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none"
+                  >
+                    <option value="all">جميع المراحل</option>
+                    {STAGES.map(stage => (
+                      <option key={stage} value={stage}>{stage}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={attendanceBadgeCountFilter}
+                    onChange={(e) => setAttendanceBadgeCountFilter(e.target.value as any)}
+                    className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none"
+                  >
+                    <option value="all">جميع أعداد الشارات</option>
+                    <option value="1">شارة واحدة</option>
+                    <option value="2">شارتين</option>
+                    <option value="3">3 شارات</option>
+                  </select>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-collapse">
+                    <thead>
+                      <tr className="bg-gray-200 text-gray-700">
+                        <th className="p-3 border border-gray-300 font-bold">اسم الفرد</th>
+                        <th className="p-3 border border-gray-300 font-bold">المرحلة</th>
+                        <th className="p-3 border border-gray-300 font-bold text-center">كام شارة</th>
+                        <th className="p-3 border border-gray-300 font-bold text-center">الاشتراك</th>
+                        {(generalSettings.attendanceDates || []).map(date => (
+                          <th key={date} className="p-3 border border-gray-300 font-bold text-center relative group min-w-[100px]">
+                            {new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                            {isSuperAdmin && (
+                              <button
+                                onClick={async () => {
+                                  if (window.confirm('هل أنت متأكد من حذف هذا اليوم؟')) {
+                                    const newDates = (generalSettings.attendanceDates || []).filter(d => d !== date);
+                                    try {
+                                      await setDoc(doc(db, 'settings', 'general'), { attendanceDates: newDates }, { merge: true });
+                                    } catch (error) {
+                                      handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                                    }
+                                  }
+                                }}
+                                className="absolute top-1 left-1 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded"
+                                title="حذف اليوم"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scouts.filter(scout => {
+                        const matchesSearch = scout.name.toLowerCase().includes(attendanceSearchQuery.toLowerCase());
+                        const matchesStage = attendanceStageFilter === 'all' || scout.stage === attendanceStageFilter;
+                        const badgesCount = [scout.badges.badge1.name, scout.badges.badge2.name, scout.badges.badge3.name].filter(Boolean).length;
+                        const matchesBadgeCount = attendanceBadgeCountFilter === 'all' || badgesCount.toString() === attendanceBadgeCountFilter;
+                        return matchesSearch && matchesStage && matchesBadgeCount;
+                      }).map(scout => {
+                        const badgesCount = [scout.badges.badge1.name, scout.badges.badge2.name, scout.badges.badge3.name].filter(Boolean).length;
+                        const totalRequired = badgesCount * (generalSettings.badgePrice || 30);
+                        const amountPaid = scout.amountPaid || 0;
+                        
+                        return (
+                          <tr key={scout.uid} className="hover:bg-gray-100 transition-colors">
+                            <td className="p-3 border border-gray-300 font-bold">{scout.name}</td>
+                            <td className="p-3 border border-gray-300 text-center font-bold text-gray-600">{scout.stage}</td>
+                            <td className="p-3 border border-gray-300 text-center font-bold text-[#4285F4]">{badgesCount}</td>
+                            <td className="p-3 border border-gray-300 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                {canManagePayments ? (
+                                  <input
+                                    type="number"
+                                    value={amountPaid}
+                                    onChange={async (e) => {
+                                      try {
+                                        await updateDoc(doc(db, 'users', scout.uid), { amountPaid: Number(e.target.value) });
+                                      } catch (error) {
+                                        handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+                                      }
+                                    }}
+                                    className="w-16 text-center bg-transparent border-b border-gray-300 focus:border-[#4285F4] outline-none"
+                                  />
+                                ) : (
+                                  <span className="font-bold text-gray-800">{amountPaid}</span>
+                                )}
+                                <span className="text-gray-500">/ {totalRequired}</span>
+                              </div>
+                            </td>
+                            {(generalSettings.attendanceDates || []).map(date => (
+                              <td key={date} className="p-3 border border-gray-300 text-center">
+                                <input
+                                  type="checkbox"
+                                  disabled={!canManageAttendance}
+                                  checked={scout.attendance?.[date] || false}
+                                  onChange={async (e) => {
+                                    try {
+                                      await updateDoc(doc(db, 'users', scout.uid), {
+                                        [`attendance.${date}`]: e.target.checked
+                                      });
+                                    } catch (error) {
+                                      handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+                                    }
+                                  }}
+                                  className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -3273,6 +3491,34 @@ enum OperationType {
                     <div>
                       <div className="font-bold text-gray-800">حذف الحسابات</div>
                       <div className="text-sm text-gray-500">صلاحية رقم 2: القدرة على حذف حسابات الكشافة</div>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-3 p-4 border rounded-2xl transition-colors ${permissionsForm.canManagePermissions ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer hover:bg-gray-50'}`}>
+                    <input
+                      type="checkbox"
+                      disabled={permissionsForm.canManagePermissions}
+                      checked={permissionsForm.canManagePermissions || permissionsForm.canManageAttendance}
+                      onChange={(e) => setPermissionsForm(prev => ({ ...prev, canManageAttendance: e.target.checked }))}
+                      className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-600 disabled:opacity-50"
+                    />
+                    <div>
+                      <div className="font-bold text-gray-800">إدارة الغياب</div>
+                      <div className="text-sm text-gray-500">القدرة على تسجيل حضور وغياب الأفراد في جدول الغياب والاشتراك</div>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-3 p-4 border rounded-2xl transition-colors ${permissionsForm.canManagePermissions ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer hover:bg-gray-50'}`}>
+                    <input
+                      type="checkbox"
+                      disabled={permissionsForm.canManagePermissions}
+                      checked={permissionsForm.canManagePermissions || permissionsForm.canManagePayments}
+                      onChange={(e) => setPermissionsForm(prev => ({ ...prev, canManagePayments: e.target.checked }))}
+                      className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-600 disabled:opacity-50"
+                    />
+                    <div>
+                      <div className="font-bold text-gray-800">إدارة الاشتراكات</div>
+                      <div className="text-sm text-gray-500">القدرة على تعديل المبالغ المدفوعة للاشتراكات</div>
                     </div>
                   </label>
                 </div>

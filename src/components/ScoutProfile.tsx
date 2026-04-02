@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ScoutProfile, BadgeSettings } from '../types';
+import { ScoutProfile, BadgeSettings, GeneralSettings } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
-import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar } from 'lucide-react';
+import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign } from 'lucide-react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -13,6 +13,12 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
     categories: [],
     requirements: {}
+  });
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
+    logoUrl: '/syncc.png',
+    scoutGroupName: 'مجموعة مارجرجس الكشفية',
+    badgePrice: 30,
+    attendanceDates: []
   });
 
   useEffect(() => {
@@ -28,7 +34,22 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
       }
     });
 
-    return () => unsubSettings();
+    const unsubGeneral = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as GeneralSettings;
+        setGeneralSettings({
+          logoUrl: '/syncc.png',
+          scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
+          badgePrice: data.badgePrice || 30,
+          attendanceDates: data.attendanceDates || []
+        });
+      }
+    });
+
+    return () => {
+      unsubSettings();
+      unsubGeneral();
+    };
   }, []);
 
   const formatDate = (timestamp: any) => {
@@ -122,6 +143,56 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge3.name] || {}}
             />
           )}
+        </div>
+      </div>
+
+      {/* Attendance and Payment Section */}
+      <div className="space-y-6">
+        <div className="flex items-center gap-3 px-2">
+          <Calendar className="text-[#4285F4]" size={24} />
+          <h3 className="text-2xl font-bold text-gray-800">الغياب والاشتراك</h3>
+        </div>
+        
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 overflow-x-auto">
+          <table className="w-full text-right border-collapse">
+            <thead>
+              <tr className="bg-gray-50 text-gray-700">
+                <th className="p-4 border-b border-gray-100 font-bold">كام شارة</th>
+                <th className="p-4 border-b border-gray-100 font-bold">الاشتراك (المطلوب / المدفوع)</th>
+                {(generalSettings.attendanceDates || []).map(date => (
+                  <th key={date} className="p-4 border-b border-gray-100 font-bold text-center">
+                    {new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="hover:bg-gray-50 transition-colors">
+                <td className="p-4 border-b border-gray-100 font-bold text-[#4285F4]">
+                  {[profile.badges.badge1?.name, profile.badges.badge2?.name, profile.badges.badge3?.name].filter(Boolean).length}
+                </td>
+                <td className="p-4 border-b border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-gray-800">{profile.amountPaid || 0}</span>
+                    <span className="text-gray-400">/</span>
+                    <span className="font-bold text-gray-500">
+                      {[profile.badges.badge1?.name, profile.badges.badge2?.name, profile.badges.badge3?.name].filter(Boolean).length * (generalSettings.badgePrice || 30)}
+                    </span>
+                    <span className="text-sm text-gray-400">جنيه</span>
+                  </div>
+                </td>
+                {(generalSettings.attendanceDates || []).map(date => (
+                  <td key={date} className="p-4 border-b border-gray-100 text-center">
+                    {profile.attendance?.[date] ? (
+                      <CheckCircle2 className="text-green-500 mx-auto" size={24} />
+                    ) : (
+                      <XCircle className="text-red-500 mx-auto" size={24} />
+                    )}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

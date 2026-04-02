@@ -22,6 +22,8 @@ export interface AdminPermissions {
   canManagePermissions?: boolean;
   canManageAllBadges: boolean;
   canDeleteAccounts: boolean;
+  canManageAttendance?: boolean;
+  canManagePayments?: boolean;
   managedStages: Stage[];
   managedBadges: string[];
 }
@@ -32,6 +34,9 @@ export interface ScoutProfile {
   email: string;
   stage: Stage;
   number: string;
+  team?: string;
+  attendance?: Record<string, boolean>;
+  amountPaid?: number;
   badges: {
     badge1: BadgeProgress;
     badge2: BadgeProgress;
@@ -75,6 +80,8 @@ export interface GeneralSettings {
   logoUrl: string;
   scoutGroupName: string;
   allowedRegistrationStages?: Stage[];
+  badgePrice?: number;
+  attendanceDates?: string[];
 }
 
 export const DEFAULT_CATEGORIES: BadgeCategory[] = [
