@@ -2169,7 +2169,7 @@ enum OperationType {
                                       }
                                     }
                                   }}
-                                  className="absolute top-0.5 left-0.5 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded"
+                                  className="absolute top-0.5 left-0.5 text-red-500 p-1 hover:bg-red-50 rounded"
                                   title="حذف اليوم"
                                 >
                                   <X size={14} />
