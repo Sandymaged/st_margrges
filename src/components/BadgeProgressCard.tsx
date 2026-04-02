@@ -1,7 +1,7 @@
-import React from 'react';
-import { Award, Info, CheckCircle2, Circle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Award, Info, CheckCircle2, Circle, ChevronDown, ChevronUp } from 'lucide-react';
 import { BadgeProgress } from '../types';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface BadgeProgressCardProps {
   badge: BadgeProgress;
@@ -12,6 +12,7 @@ interface BadgeProgressCardProps {
 }
 
 export default function BadgeProgressCard({ badge, label, requirements = [], requirementMaxScores = {}, requirementCategories = {} }: BadgeProgressCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const hasReqs = requirements.length > 0;
   const completedReqs = (badge.completedRequirements || []).filter(r => requirements.includes(r));
 
@@ -29,47 +30,74 @@ export default function BadgeProgressCard({ badge, label, requirements = [], req
         </div>
       </div>
 
-      {/* Requirements Checklist */}
       {hasReqs && (
-        <div className="mt-4 space-y-4">
-          <h4 className="text-sm font-bold text-gray-700 mb-2">متطلبات الشارة:</h4>
-          {Object.entries(
-            requirements.reduce((acc, req) => {
-              const category = requirementCategories[req] || 'عام';
-              if (!acc[category]) acc[category] = [];
-              acc[category].push(req);
-              return acc;
-            }, {} as Record<string, string[]>)
-          ).map(([category, reqs]) => (
-            <div key={category} className="space-y-2">
-              <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
-                {category} :-
-              </h5>
-              {reqs.map((req, idx) => {
-                const isCompleted = completedReqs.includes(req);
-                
-                return (
-                  <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                    {isCompleted ? (
-                      <CheckCircle2 size={20} className="text-[#34A853] shrink-0 mt-0.5" />
-                    ) : (
-                      <Circle size={20} className="text-gray-300 shrink-0 mt-0.5" />
-                    )}
-                    <div className="flex flex-col flex-1">
-                      <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
-                        {req}
-                      </span>
-                      <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                        {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="w-full flex items-center justify-center gap-2 py-2 mb-2 bg-gray-50 hover:bg-gray-100 text-gray-600 rounded-xl transition-colors text-sm font-bold"
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp size={16} />
+              إخفاء البنود
+            </>
+          ) : (
+            <>
+              <ChevronDown size={16} />
+              إظهار البنود
+            </>
+          )}
+        </button>
       )}
+
+      {/* Requirements Checklist */}
+      <AnimatePresence>
+        {hasReqs && isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-2 space-y-4">
+              {Object.entries(
+                requirements.reduce((acc, req) => {
+                  const category = requirementCategories[req] || 'عام';
+                  if (!acc[category]) acc[category] = [];
+                  acc[category].push(req);
+                  return acc;
+                }, {} as Record<string, string[]>)
+              ).map(([category, reqs]) => (
+                <div key={category} className="space-y-2">
+                  <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
+                    {category} :-
+                  </h5>
+                  {reqs.map((req, idx) => {
+                    const isCompleted = completedReqs.includes(req);
+                    
+                    return (
+                      <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                        {isCompleted ? (
+                          <CheckCircle2 size={20} className="text-[#34A853] shrink-0 mt-0.5" />
+                        ) : (
+                          <Circle size={20} className="text-gray-300 shrink-0 mt-0.5" />
+                        )}
+                        <div className="flex flex-col flex-1">
+                          <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                            {req}
+                          </span>
+                          <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                            {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Notes */}
       {badge.notes && (

@@ -201,6 +201,7 @@ enum OperationType {
   const canDeleteAccounts = isSuperAdmin || currentProfile?.permissions?.canDeleteAccounts;
   const canManageAttendance = isSuperAdmin || currentProfile?.permissions?.canManageAttendance;
   const canManagePayments = isSuperAdmin || currentProfile?.permissions?.canManagePayments;
+  const canAccessSettings = canManageAllBadges || canManageAttendance || canManagePayments || canDeleteAccounts;
   
   const canDeleteThisScout = (scout: ScoutProfile) => {
     if (scout.uid === currentProfile?.uid) return false;
@@ -1297,6 +1298,14 @@ enum OperationType {
     }
   };
 
+  const availableTabs = [];
+  if (canManageAllBadges) availableTabs.push('categories', 'requirements');
+  if (isSuperAdmin) availableTabs.push('general');
+  if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
+  if (canDeleteAccounts) availableTabs.push('cleanup');
+
+  const activeSettingsTab = availableTabs.includes(settingsTab) ? settingsTab : (availableTabs[0] || 'categories');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1331,7 +1340,7 @@ enum OperationType {
           <BarChart3 size={20} />
           تقييم البنود
         </button>
-        {canManageAllBadges && (
+        {canAccessSettings && (
           <button
             onClick={() => setActiveTab('settings')}
             className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all shrink-0 ${
@@ -1346,65 +1355,73 @@ enum OperationType {
         )}
       </div>
 
-      {activeTab === 'settings' && canManageAllBadges ? (
+      {activeTab === 'settings' && canAccessSettings ? (
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-8">
           <div className="flex gap-4 border-b border-gray-100 pb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
-            <button
-              onClick={() => setSettingsTab('categories')}
-              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'categories' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >
-              تصنيف الشارات
-            </button>
-            <button
-              onClick={() => setSettingsTab('requirements')}
-              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >
-              بنود الشارات
-            </button>
-            <button
-              onClick={() => setSettingsTab('general')}
-              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'general' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >
-              إعدادات عامة
-            </button>
-            <button
-              onClick={() => setSettingsTab('attendance')}
-              className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'attendance' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >
-              الغياب والاشتراك
-            </button>
+            {canManageAllBadges && (
+              <>
+                <button
+                  onClick={() => setSettingsTab('categories')}
+                  className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'categories' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  تصنيف الشارات
+                </button>
+                <button
+                  onClick={() => setSettingsTab('requirements')}
+                  className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  بنود الشارات
+                </button>
+              </>
+            )}
+            {isSuperAdmin && (
+              <button
+                onClick={() => setSettingsTab('general')}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'general' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                إعدادات عامة
+              </button>
+            )}
+            {(canManageAttendance || canManagePayments) && (
+              <button
+                onClick={() => setSettingsTab('attendance')}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'attendance' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                الغياب والاشتراك
+              </button>
+            )}
             {canDeleteAccounts && (
               <button
                 onClick={() => setSettingsTab('cleanup')}
-                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${settingsTab === 'cleanup' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'cleanup' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
                 إزالة الحسابات العالقة
               </button>
             )}
           </div>
 
-          {settingsTab === 'categories' ? (
+          {activeSettingsTab === 'categories' ? (
             <div className="space-y-8">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-black text-gray-800 mb-2">إدارة تصنيفات الشارات</h2>
                   <p className="text-gray-500">قم بإضافة أو حذف التصنيفات والشارات المتاحة في النظام.</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <input
                     type="text"
                     placeholder="اسم التصنيف الجديد..."
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
-                    className="px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                    className="px-3 py-1.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold w-40"
                   />
                   <button
                     onClick={handleAddCategory}
                     disabled={!newCategoryName.trim()}
-                    className="px-4 py-2 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
+                    className="px-3 py-1.5 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-1 text-sm whitespace-nowrap"
                   >
-                    <Plus size={18} />
-                    إضافة تصنيف
+                    <Plus size={16} />
+                    إضافة
                   </button>
                 </div>
               </div>
@@ -1549,7 +1566,7 @@ enum OperationType {
                 ))}
               </div>
             </div>
-          ) : settingsTab === 'requirements' ? (
+          ) : activeSettingsTab === 'requirements' ? (
             <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">بنود ومتطلبات الشارات</h2>
@@ -1779,7 +1796,7 @@ enum OperationType {
                 </div>
               </div>
             </div>
-          ) : settingsTab === 'cleanup' ? (
+          ) : activeSettingsTab === 'cleanup' ? (
               <div className="space-y-6">
                 <div>
                   <h2 className="text-2xl font-black text-gray-800 mb-2">إدارة الحسابات العالقة</h2>
@@ -1846,7 +1863,7 @@ enum OperationType {
                   </div>
                 </div>
               </div>
-          ) : settingsTab === 'general' ? (
+          ) : activeSettingsTab === 'general' ? (
             <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">الإعدادات العامة</h2>
@@ -1854,14 +1871,14 @@ enum OperationType {
               </div>
 
               <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-4">اسم المجموعة الكشفية</h3>
-                  <div className="flex gap-2">
+                <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100">
+                  <h3 className="text-lg font-bold text-gray-800 mb-4">اسم المجموعة الكشفية</h3>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                     <input
                       type="text"
                       value={generalSettings.scoutGroupName || ''}
                       onChange={(e) => setGeneralSettings(prev => ({ ...prev, scoutGroupName: e.target.value }))}
-                      className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                      className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold bg-white"
                       placeholder="مثال: مجموعة مارجرجس الكشفية"
                     />
                     <button
@@ -1876,9 +1893,9 @@ enum OperationType {
                           setMessage({ type: 'error', text: 'حدث خطأ أثناء حفظ اسم المجموعة' });
                         }
                       }}
-                      className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] transition-colors font-bold"
+                      className="px-8 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] transition-colors font-bold text-sm whitespace-nowrap shadow-sm"
                     >
-                      حفظ الاسم
+                      حفظ التعديل
                     </button>
                   </div>
                 </div>
@@ -2014,7 +2031,7 @@ enum OperationType {
                 </div>
               </div>
             </div>
-          ) : settingsTab === 'attendance' ? (
+          ) : activeSettingsTab === 'attendance' ? (
             <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">الغياب والاشتراك</h2>
@@ -2022,15 +2039,17 @@ enum OperationType {
               </div>
 
               {isSuperAdmin && (
-                <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 space-y-4">
-                  <h3 className="text-xl font-bold text-gray-800 mb-4">إعدادات الاشتراك</h3>
-                  <div className="flex gap-4 items-center">
-                    <label className="font-bold text-gray-700 whitespace-nowrap">سعر الشارة الواحدة:</label>
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-center justify-between max-w-sm">
+                  <h3 className="text-lg font-bold text-gray-800">سعر الشارة:</h3>
+                  <div className="flex gap-2 items-center">
                     <input
                       type="number"
+                      max="99"
+                      maxLength={2}
                       value={generalSettings.badgePrice || 30}
                       onChange={async (e) => {
-                        const newPrice = Number(e.target.value);
+                        let newPrice = Number(e.target.value);
+                        if (newPrice > 99) newPrice = 99;
                         setGeneralSettings(prev => ({ ...prev, badgePrice: newPrice }));
                         try {
                           await setDoc(doc(db, 'settings', 'general'), { badgePrice: newPrice }, { merge: true });
@@ -2038,9 +2057,9 @@ enum OperationType {
                           handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
                         }
                       }}
-                      className="w-32 px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold"
+                      className="w-16 px-2 py-1.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold"
                     />
-                    <span className="font-bold text-gray-500">جنيه</span>
+                    <span className="font-bold text-gray-500 text-sm">جنيه</span>
                   </div>
                 </div>
               )}
@@ -2049,12 +2068,12 @@ enum OperationType {
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                   <h3 className="text-xl font-bold text-gray-800">سجل الغياب والاشتراكات</h3>
                   {isSuperAdmin && (
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
                       <input
                         type="date"
                         value={newAttendanceDate}
                         onChange={(e) => setNewAttendanceDate(e.target.value)}
-                        className="px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold"
+                        className="flex-1 md:flex-none px-3 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-sm min-w-[130px]"
                       />
                       <button
                         onClick={async () => {
@@ -2072,9 +2091,9 @@ enum OperationType {
                             handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
                           }
                         }}
-                        className="px-4 py-2 bg-[#4285F4] text-white font-bold rounded-xl hover:bg-blue-600 transition-all"
+                        className="px-4 py-2 bg-[#4285F4] text-white font-bold rounded-xl hover:bg-blue-600 transition-all text-sm whitespace-nowrap flex-shrink-0 shadow-sm"
                       >
-                        إضافة يوم أخر
+                        إضافة يوم
                       </button>
                     </div>
                   )}
@@ -2117,39 +2136,54 @@ enum OperationType {
                 <div className="overflow-x-auto">
                   <table className="w-full text-right border-collapse">
                     <thead>
-                      <tr className="bg-gray-200 text-gray-700">
+                      <tr className="bg-gray-200 text-gray-700 text-sm">
                         <th className="p-3 border border-gray-300 font-bold">اسم الفرد</th>
                         <th className="p-3 border border-gray-300 font-bold">المرحلة</th>
                         <th className="p-3 border border-gray-300 font-bold text-center">كام شارة</th>
                         <th className="p-3 border border-gray-300 font-bold text-center">الاشتراك</th>
-                        {(generalSettings.attendanceDates || []).map(date => (
-                          <th key={date} className="p-3 border border-gray-300 font-bold text-center relative group min-w-[100px]">
-                            {new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                            {isSuperAdmin && (
-                              <button
-                                onClick={async () => {
-                                  if (window.confirm('هل أنت متأكد من حذف هذا اليوم؟')) {
-                                    const newDates = (generalSettings.attendanceDates || []).filter(d => d !== date);
-                                    try {
-                                      await setDoc(doc(db, 'settings', 'general'), { attendanceDates: newDates }, { merge: true });
-                                    } catch (error) {
-                                      handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                        {(generalSettings.attendanceDates || []).map(date => {
+                          const d = new Date(date);
+                          const day = d.getDate();
+                          const month = d.getMonth() + 1;
+                          const monthName = d.toLocaleDateString('en-GB', { month: 'short' });
+                          
+                          return (
+                            <th key={date} className="p-2 border border-gray-300 font-bold text-center relative group min-w-[80px]">
+                              <div className="flex flex-col items-center justify-center leading-tight">
+                                <div className="flex items-center gap-1">
+                                  <span>{day}</span>
+                                  <span>-</span>
+                                  <span>{monthName}</span>
+                                </div>
+                                <span className="text-xs text-gray-500">({month}/{day})</span>
+                              </div>
+                              {isSuperAdmin && (
+                                <button
+                                  onClick={async () => {
+                                    if (window.confirm('هل أنت متأكد من حذف هذا اليوم؟')) {
+                                      const newDates = (generalSettings.attendanceDates || []).filter(d => d !== date);
+                                      try {
+                                        await setDoc(doc(db, 'settings', 'general'), { attendanceDates: newDates }, { merge: true });
+                                      } catch (error) {
+                                        handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                                      }
                                     }
-                                  }
-                                }}
-                                className="absolute top-1 left-1 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded"
-                                title="حذف اليوم"
-                              >
-                                <X size={14} />
-                              </button>
-                            )}
-                          </th>
-                        ))}
+                                  }}
+                                  className="absolute top-0.5 left-0.5 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded"
+                                  title="حذف اليوم"
+                                >
+                                  <X size={14} />
+                                </button>
+                              )}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="text-sm">
                       {scouts.filter(scout => {
-                        const matchesSearch = scout.name.toLowerCase().includes(attendanceSearchQuery.toLowerCase());
+                        const matchesSearch = scout.name.toLowerCase().includes(attendanceSearchQuery.toLowerCase()) || 
+                                              (scout.number && scout.number.includes(attendanceSearchQuery));
                         const matchesStage = attendanceStageFilter === 'all' || scout.stage === attendanceStageFilter;
                         const badgesCount = [scout.badges.badge1.name, scout.badges.badge2.name, scout.badges.badge3.name].filter(Boolean).length;
                         const matchesBadgeCount = attendanceBadgeCountFilter === 'all' || badgesCount.toString() === attendanceBadgeCountFilter;
@@ -2161,7 +2195,10 @@ enum OperationType {
                         
                         return (
                           <tr key={scout.uid} className="hover:bg-gray-100 transition-colors">
-                            <td className="p-3 border border-gray-300 font-bold">{scout.name}</td>
+                            <td className="p-3 border border-gray-300">
+                              <div className="font-bold">{scout.name}</div>
+                              {scout.number && <div className="text-xs text-gray-500">{scout.number}</div>}
+                            </td>
                             <td className="p-3 border border-gray-300 text-center font-bold text-gray-600">{scout.stage}</td>
                             <td className="p-3 border border-gray-300 text-center font-bold text-[#4285F4]">{badgesCount}</td>
                             <td className="p-3 border border-gray-300 text-center">
@@ -2169,7 +2206,7 @@ enum OperationType {
                                 {canManagePayments ? (
                                   <input
                                     type="number"
-                                    value={amountPaid}
+                                    value={amountPaid || 0}
                                     onChange={async (e) => {
                                       try {
                                         await updateDoc(doc(db, 'users', scout.uid), { amountPaid: Number(e.target.value) });
@@ -2177,7 +2214,7 @@ enum OperationType {
                                         handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
                                       }
                                     }}
-                                    className="w-16 text-center bg-transparent border-b border-gray-300 focus:border-[#4285F4] outline-none"
+                                    className="w-12 text-center bg-transparent border-b border-gray-300 focus:border-[#4285F4] outline-none"
                                   />
                                 ) : (
                                   <span className="font-bold text-gray-800">{amountPaid}</span>
@@ -3272,7 +3309,7 @@ enum OperationType {
                                       min="0"
                                       max="100"
                                       disabled={!canEdit}
-                                      value={badge.progress}
+                                      value={badge.progress || 0}
                                       onChange={(e) => updateBadgeValue(key, 'progress', parseInt(e.target.value) || 0)}
                                       className="w-20 px-3 py-2 rounded-xl border border-gray-200 text-center font-black text-[#4285F4] text-lg disabled:bg-gray-100 disabled:text-gray-500"
                                     />
@@ -3369,7 +3406,7 @@ enum OperationType {
                                 min="0"
                                 max="100"
                                 disabled={!canEdit}
-                                value={badge.progress}
+                                value={badge.progress || 0}
                                 onChange={(e) => updateBadgeValue(key, 'progress', parseInt(e.target.value))}
                                 className="w-full h-3 bg-gray-200 rounded-full appearance-none cursor-pointer accent-[#4285F4] disabled:cursor-not-allowed disabled:opacity-50"
                               />
@@ -3379,7 +3416,7 @@ enum OperationType {
                               <label className="text-xs font-black text-gray-500 mr-2 uppercase">ملاحظات المسؤول:</label>
                               <textarea
                                 disabled={!canEdit}
-                                value={badge.notes}
+                                value={badge.notes || ''}
                                 onChange={(e) => updateBadgeValue(key, 'notes', e.target.value)}
                                 placeholder={canEdit ? "أضف ملاحظاتك هنا..." : "لا تملك صلاحية إضافة ملاحظات"}
                                 className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-medium disabled:bg-gray-100 disabled:text-gray-500"
@@ -3622,7 +3659,7 @@ enum OperationType {
                 <div className="space-y-2">
                   <label className="text-sm font-bold text-gray-700">نص البند:</label>
                   <textarea
-                    value={editingRequirement.newText}
+                    value={editingRequirement.newText || ''}
                     onChange={(e) => setEditingRequirement(prev => prev ? { ...prev, newText: e.target.value } : null)}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700 min-h-[100px]"
                   />

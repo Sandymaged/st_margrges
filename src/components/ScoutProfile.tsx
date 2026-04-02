@@ -158,12 +158,26 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
             <thead>
               <tr className="bg-gray-50 text-gray-700">
                 <th className="p-4 border-b border-gray-100 font-bold">كام شارة</th>
-                <th className="p-4 border-b border-gray-100 font-bold">الاشتراك (المطلوب / المدفوع)</th>
-                {(generalSettings.attendanceDates || []).map(date => (
-                  <th key={date} className="p-4 border-b border-gray-100 font-bold text-center">
-                    {new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                  </th>
-                ))}
+                <th className="p-4 border-b border-gray-100 font-bold">الاشتراك (المدفوع / المطلوب)</th>
+                {(generalSettings.attendanceDates || []).map(date => {
+                  const d = new Date(date);
+                  const day = d.getDate();
+                  const month = d.getMonth() + 1;
+                  const monthName = d.toLocaleDateString('en-GB', { month: 'short' });
+                  
+                  return (
+                    <th key={date} className="p-4 border-b border-gray-100 font-bold text-center">
+                      <div className="flex flex-col items-center justify-center leading-tight">
+                        <div className="flex items-center gap-1">
+                          <span>{day}</span>
+                          <span>-</span>
+                          <span>{monthName}</span>
+                        </div>
+                        <span className="text-xs text-gray-500 mt-1">({month}/{day})</span>
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
