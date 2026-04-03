@@ -483,7 +483,7 @@ enum OperationType {
   };
 
   const handleCreateAccount = async () => {
-    if (!isSuperAdmin) return;
+    if (!isSuperAdmin || creatingAccount) return;
     if (!newAccountForm.name || !newAccountForm.phone || !newAccountForm.password) {
       setMessage({ type: 'error', text: 'يرجى ملء جميع البيانات المطلوبة' });
       return;
@@ -1903,7 +1903,13 @@ enum OperationType {
                 {isSuperAdmin && (
                   <>
                     <hr className="border-gray-100" />
-                    <div className="space-y-6">
+                    <div className="space-y-6 relative">
+                      {creatingAccount && (
+                        <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-2xl">
+                          <div className="w-10 h-10 border-4 border-[#4285F4]/30 border-t-[#4285F4] rounded-full animate-spin mb-3" />
+                          <p className="font-bold text-[#4285F4]">جاري إنشاء الحساب...</p>
+                        </div>
+                      )}
                       <div className="flex items-center gap-3">
                         <div className="p-3 bg-[#4285F4]/10 rounded-2xl text-[#4285F4]">
                           <ShieldPlus size={24} />

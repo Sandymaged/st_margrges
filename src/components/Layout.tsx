@@ -95,7 +95,7 @@ export default function Layout({ children, user, profile, view, setView, general
                 onClick={() => setView && setView('profile')} 
                 className="flex items-center gap-3 hover:opacity-80 transition-opacity"
               >
-                <div className="h-10 w-10 bg-white rounded-full p-1 flex items-center justify-center shadow-inner overflow-hidden">
+                <div className="h-10 w-10 flex items-center justify-center overflow-hidden">
                   <img 
                     src="/syncc.png" 
                     alt="Scouts Logo" 
