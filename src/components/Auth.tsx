@@ -17,8 +17,10 @@ import {
   MessageSquare,
   LogOut,
   X,
-  Plus
+  Plus,
+  Loader2
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 enum OperationType {
   CREATE = 'create',
@@ -267,9 +269,32 @@ export default function Auth() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[80vh] py-12">
-      <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-2xl w-full border border-gray-100">
+      <AnimatePresence>
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[100] flex flex-col items-center justify-center"
+          >
+            <div className="h-24 w-24 mb-6 flex items-center justify-center overflow-hidden animate-pulse">
+              <img 
+                src={generalSettings.logoUrl || "/syncc.png"} 
+                alt="Scouts Logo" 
+                className="h-full w-full object-contain"
+              />
+            </div>
+            <div className="flex items-center gap-3 text-[#4285F4]">
+              <Loader2 className="animate-spin" size={24} />
+              <span className="font-bold text-lg">جاري التحميل...</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-2xl w-full border border-gray-100 relative">
         <div className="text-center mb-8">
-          <div className="h-20 w-20 mx-auto mb-4 bg-white rounded-full p-2 shadow-inner flex items-center justify-center overflow-hidden border border-gray-100">
+          <div className="h-20 w-20 mx-auto mb-4 flex items-center justify-center overflow-hidden">
             <img 
               src="/syncc.png" 
               alt="Scouts Logo" 

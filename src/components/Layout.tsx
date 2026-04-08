@@ -23,6 +23,18 @@ export default function Layout({ children, user, profile, view, setView, general
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUpdatingLogo, setIsUpdatingLogo] = useState(false);
 
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const handleNavigateToProfile = () => {
+    if (setView && view !== 'profile') {
+      setIsNavigating(true);
+      setTimeout(() => {
+        setView('profile');
+        setIsNavigating(false);
+      }, 600); // Simulate a brief loading delay
+    }
+  };
+
   const isSuperAdmin = profile?.number === '01555165366' || profile?.email === 'begolbahaa98@gmail.com' || profile?.permissions?.canManagePermissions;
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,16 +98,40 @@ export default function Layout({ children, user, profile, view, setView, general
 
   return (
     <div className="min-h-screen bg-[#F0F2F5] font-sans" dir="rtl">
+      {/* Navigation Loading Overlay */}
+      <AnimatePresence>
+        {isNavigating && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[100] flex flex-col items-center justify-center"
+          >
+            <div className="h-24 w-24 mb-6 flex items-center justify-center overflow-hidden animate-pulse">
+              <img 
+                src="/syncc.png" 
+                alt="Scouts Logo" 
+                className="h-full w-full object-contain"
+              />
+            </div>
+            <div className="flex items-center gap-3 text-[#4285F4]">
+              <Loader2 className="animate-spin" size={24} />
+              <span className="font-bold text-lg">جاري التحميل...</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <header className="bg-[#4285F4] text-white shadow-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="relative group">
               <button 
-                onClick={() => setView && setView('profile')} 
+                onClick={handleNavigateToProfile} 
                 className="flex items-center gap-3 hover:opacity-80 transition-opacity"
               >
-                <div className="h-10 w-10 flex items-center justify-center overflow-hidden">
+                <div className="h-14 w-14 flex items-center justify-center overflow-hidden">
                   <img 
                     src="/syncc.png" 
                     alt="Scouts Logo" 

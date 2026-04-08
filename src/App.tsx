@@ -15,6 +15,32 @@ import AdminDashboard from './components/AdminDashboard';
 import { LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+const SkeletonLoader = () => (
+  <div className="space-y-8 animate-pulse" dir="rtl">
+    <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+      <div className="flex flex-col md:flex-row items-center gap-8">
+        <div className="h-32 w-32 bg-gray-200 rounded-3xl"></div>
+        <div className="flex-1 text-center md:text-right space-y-4 w-full">
+          <div className="h-8 bg-gray-200 rounded-lg w-1/3 mx-auto md:mx-0"></div>
+          <div className="flex flex-wrap justify-center md:justify-start gap-4">
+            <div className="h-10 bg-gray-200 rounded-xl w-32"></div>
+            <div className="h-10 bg-gray-200 rounded-xl w-32"></div>
+            <div className="h-10 bg-gray-200 rounded-xl w-40"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div className="space-y-6">
+      <div className="h-8 bg-gray-200 rounded-lg w-48"></div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="bg-white p-6 rounded-3xl border border-gray-100 h-64"></div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ScoutProfile | null>(null);
@@ -72,7 +98,7 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  if (!isAuthReady || (user && loading)) {
+  if (!isAuthReady) {
     return (
       <div className="min-h-screen bg-[#F0F2F5] flex items-center justify-center">
         <motion.div 
@@ -94,7 +120,16 @@ export default function App() {
   return (
     <Layout user={user} profile={profile} view={view} setView={setView} generalSettings={generalSettings}>
       <AnimatePresence mode="wait">
-        {!user ? (
+        {user && loading ? (
+          <motion.div
+            key="loading"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <SkeletonLoader />
+          </motion.div>
+        ) : !user ? (
           <motion.div
             key="auth"
             initial={{ opacity: 0, y: 20 }}
@@ -122,10 +157,11 @@ export default function App() {
           </motion.div>
         ) : (
           <motion.div
-            key="content"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
+            key={`content-${view}`}
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.3 }}
           >
             {profile.role === 'admin' && view === 'dashboard' ? (
               <AdminDashboard currentProfile={profile} />
