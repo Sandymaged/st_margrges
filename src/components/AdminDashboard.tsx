@@ -2385,6 +2385,9 @@ enum OperationType {
                                 <span className="text-xs text-gray-500">({month}/{day})</span>
                                 <button
                                   onClick={() => {
+                                    if (scannerDate !== date) {
+                                      setScanLogs([]);
+                                    }
                                     setScannerDate(date);
                                     setIsScannerOpen(true);
                                   }}
@@ -3959,8 +3962,6 @@ enum OperationType {
                 onScanSuccess={handleScanSuccess} 
                 onClose={() => {
                   setIsScannerOpen(false);
-                  setScannerDate(null);
-                  setScanLogs([]);
                 }} 
               />
               
