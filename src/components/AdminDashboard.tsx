@@ -17,6 +17,8 @@ import {
   PHONE_REGEX,
   GeneralSettings
 } from '../types';
+import { logActivity } from '../utils/logger';
+import QRScanner from './QRScanner';
 import { 
   Search, 
   Filter, 
@@ -59,6 +61,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [gradingStageFilter, setGradingStageFilter] = useState<Stage | 'all'>('all');
   const [activeBadgeTab, setActiveBadgeTab] = useState<'badge1' | 'badge2' | 'badge3'>('badge1');
   const [scouts, setScouts] = useState<ScoutProfile[]>([]);
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
     categories: DEFAULT_CATEGORIES,
     requirements: {},
@@ -76,6 +79,9 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [newRequirementInput, setNewRequirementInput] = useState('');
   const [newRequirementCategory, setNewRequirementCategory] = useState('');
   const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance'>('categories');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerDate, setScannerDate] = useState<string | null>(null);
+  const [scanLogs, setScanLogs] = useState<{name: string, time: string}[]>([]);
   const [selectedCategoryForEdit, setSelectedCategoryForEdit] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
@@ -342,10 +348,24 @@ enum OperationType {
       }
     });
 
+    let unsubscribeLogs: any = null;
+    if (isSuperAdmin) {
+      unsubscribeLogs = onSnapshot(query(collection(db, 'activity_logs')), (snapshot) => {
+        const logs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+        logs.sort((a: any, b: any) => {
+          const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+          const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+          return timeB - timeA;
+        });
+        setActivityLogs(logs);
+      });
+    }
+
     return () => {
       unsubscribeUsers();
       unsubscribeSettings();
       unsubscribeGeneralSettings();
+      if (unsubscribeLogs) unsubscribeLogs();
     };
   }, [isSuperAdmin]);
 
@@ -482,6 +502,41 @@ enum OperationType {
     }
   };
 
+  const handleScanSuccess = async (scannedUid: string) => {
+    if (!scannerDate) return;
+    
+    const scout = scouts.find(s => s.uid === scannedUid);
+    if (!scout) {
+      setMessage({ type: 'error', text: 'لم يتم العثور على الكشاف' });
+      return;
+    }
+
+    if (scout.attendance?.[scannerDate]) {
+      setMessage({ type: 'error', text: `تم تسجيل حضور ${scout.name} مسبقاً` });
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'users', scout.uid), {
+        [`attendance.${scannerDate}`]: true
+      });
+      
+      const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setScanLogs(prev => [{ name: scout.name, time: timeStr }, ...prev]);
+      
+      await logActivity(
+        'تسجيل غياب (QR)',
+        `تم تسجيل حضور ليوم ${scannerDate} عبر مسح الكود`,
+        currentProfile.uid,
+        currentProfile.name || 'مسؤول',
+        scout.uid,
+        scout.name
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+    }
+  };
+
   const handleCreateAccount = async () => {
     if (!isSuperAdmin || creatingAccount) return;
     if (!newAccountForm.name || !newAccountForm.phone || !newAccountForm.password) {
@@ -523,6 +578,14 @@ enum OperationType {
       };
 
       await setDoc(doc(db, 'users', user.uid), profile);
+      await logActivity(
+        'إنشاء حساب',
+        `تم إنشاء حساب جديد بدور ${newAccountForm.role}`,
+        currentProfile.uid,
+        currentProfile.name || 'مسؤول',
+        user.uid,
+        newAccountForm.name
+      );
       await signOut(secondaryAuth);
       
       setMessage({ type: 'success', text: 'تم إنشاء الحساب بنجاح' });
@@ -612,6 +675,14 @@ enum OperationType {
               [`badges.${badgeKey}.completedRequirements`]: newCompletedReqs,
               [`badges.${badgeKey}.progress`]: newProgress
             });
+            await logActivity(
+              'تقييم جماعي',
+              `تم تحديث تقييم شارة ${gradingSelectedBadge}`,
+              currentProfile.uid,
+              currentProfile.name || 'مسؤول',
+              scout.uid,
+              scout.name
+            );
             updatedCount++;
           }
         }
@@ -724,6 +795,14 @@ enum OperationType {
       };
 
       await updateDoc(doc(db, 'users', editingScout.uid), updates);
+      await logActivity(
+        'تعديل بيانات',
+        `تم تعديل بيانات المستخدم الأساسية`,
+        currentProfile.uid,
+        currentProfile.name || 'مسؤول',
+        editingScout.uid,
+        editingScout.name
+      );
       setMessage({ type: 'success', text: 'تم تحديث البيانات بنجاح' });
       if (closeAfterSave) {
         setEditingScout(null);
@@ -775,6 +854,14 @@ enum OperationType {
       await updateDoc(doc(db, 'users', scout.uid), {
         [`badges.${badgeKey}`]: updatedBadge
       });
+      await logActivity(
+        'تحديث شارة',
+        `تم تحديث تقييم شارة ${updatedBadge.name}`,
+        currentProfile.uid,
+        currentProfile.name || 'مسؤول',
+        scout.uid,
+        scout.name
+      );
       console.log('Badge updated successfully');
       
       setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
@@ -1177,6 +1264,14 @@ enum OperationType {
       await updateDoc(doc(db, 'users', editingPermissionsFor.uid), {
         permissions: permissionsForm
       });
+      await logActivity(
+        'تحديث صلاحيات',
+        `تم تحديث صلاحيات المستخدم`,
+        currentProfile.uid,
+        currentProfile.name || 'مسؤول',
+        editingPermissionsFor.uid,
+        editingPermissionsFor.name
+      );
       setMessage({ type: 'success', text: 'تم تحديث الصلاحيات بنجاح' });
       setEditingPermissionsFor(null);
     } catch (error) {
@@ -1197,6 +1292,15 @@ enum OperationType {
 
     try {
       await updateDoc(doc(db, 'users', scoutId), { role: newRole });
+      const targetScout = scouts.find(s => s.uid === scoutId);
+      await logActivity(
+        'تغيير دور',
+        actionText,
+        currentProfile.uid,
+        currentProfile.name || 'مسؤول',
+        scoutId,
+        targetScout?.name
+      );
       setMessage({ type: 'success', text: `تم ${actionText} بنجاح` });
       return true;
     } catch (error) {
@@ -1216,6 +1320,14 @@ enum OperationType {
     try {
       // 1. Delete from Firestore
       await deleteDoc(doc(db, 'users', deletingScout.uid));
+      await logActivity(
+        'حذف حساب',
+        `تم حذف حساب المستخدم`,
+        currentProfile.uid,
+        currentProfile.name || 'مسؤول',
+        deletingScout.uid,
+        deletingScout.name
+      );
       
       // 2. Try to delete from Firebase Authentication via our backend API
       const user = auth.currentUser;
@@ -1300,7 +1412,7 @@ enum OperationType {
 
   const availableTabs = [];
   if (canManageAllBadges) availableTabs.push('categories', 'requirements');
-  if (isSuperAdmin) availableTabs.push('general');
+  if (isSuperAdmin) availableTabs.push('general', 'activity_logs');
   if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
   if (canDeleteAccounts) availableTabs.push('cleanup');
 
@@ -1375,12 +1487,20 @@ enum OperationType {
               </>
             )}
             {isSuperAdmin && (
-              <button
-                onClick={() => setSettingsTab('general')}
-                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'general' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                إعدادات عامة
-              </button>
+              <>
+                <button
+                  onClick={() => setSettingsTab('general')}
+                  className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'general' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  إعدادات عامة
+                </button>
+                <button
+                  onClick={() => setSettingsTab('activity_logs')}
+                  className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'activity_logs' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  سجل النشاطات
+                </button>
+              </>
             )}
             {(canManageAttendance || canManagePayments) && (
               <button
@@ -1796,6 +1916,53 @@ enum OperationType {
                 </div>
               </div>
             </div>
+          ) : activeSettingsTab === 'activity_logs' ? (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 mb-2">سجل النشاطات</h2>
+                <p className="text-gray-500 font-bold">سجل بجميع التعديلات التي تمت على النظام والأفراد.</p>
+              </div>
+              <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-700">
+                        <th className="p-4 font-bold">التاريخ والوقت</th>
+                        <th className="p-4 font-bold">المسؤول</th>
+                        <th className="p-4 font-bold">الإجراء</th>
+                        <th className="p-4 font-bold">التفاصيل</th>
+                        <th className="p-4 font-bold">المستخدم المستهدف</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activityLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-8 text-center text-gray-500 font-bold">
+                            لا توجد نشاطات مسجلة حتى الآن
+                          </td>
+                        </tr>
+                      ) : (
+                        activityLogs.map((log) => (
+                          <tr key={log.id} className="border-t border-gray-50 hover:bg-gray-50 transition-colors">
+                            <td className="p-4 text-sm text-gray-600">
+                              {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-EG') : 'غير متوفر'}
+                            </td>
+                            <td className="p-4 font-bold text-gray-800">{log.adminName}</td>
+                            <td className="p-4">
+                              <span className="px-3 py-1 bg-blue-50 text-[#4285F4] rounded-full text-xs font-bold">
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="p-4 text-sm text-gray-600">{log.details}</td>
+                            <td className="p-4 font-bold text-gray-800">{log.targetUserName || '-'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           ) : activeSettingsTab === 'cleanup' ? (
               <div className="space-y-6">
                 <div>
@@ -2162,6 +2329,16 @@ enum OperationType {
                                   <span>{monthName}</span>
                                 </div>
                                 <span className="text-xs text-gray-500">({month}/{day})</span>
+                                <button
+                                  onClick={() => {
+                                    setScannerDate(date);
+                                    setIsScannerOpen(true);
+                                  }}
+                                  className="mt-1 flex items-center gap-1 text-xs bg-blue-50 text-[#4285F4] px-2 py-1 rounded-md hover:bg-blue-100 transition-colors"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>
+                                  Scanner
+                                </button>
                               </div>
                               {isSuperAdmin && (
                                 <button
@@ -2216,6 +2393,14 @@ enum OperationType {
                                     onChange={async (e) => {
                                       try {
                                         await updateDoc(doc(db, 'users', scout.uid), { amountPaid: Number(e.target.value) });
+                                        await logActivity(
+                                          'تحديث اشتراك',
+                                          `تم تحديث المبلغ المدفوع إلى ${e.target.value}`,
+                                          currentProfile.uid,
+                                          currentProfile.name || 'مسؤول',
+                                          scout.uid,
+                                          scout.name
+                                        );
                                       } catch (error) {
                                         handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
                                       }
@@ -2239,6 +2424,14 @@ enum OperationType {
                                       await updateDoc(doc(db, 'users', scout.uid), {
                                         [`attendance.${date}`]: e.target.checked
                                       });
+                                      await logActivity(
+                                        'تسجيل غياب',
+                                        `تم ${e.target.checked ? 'تسجيل حضور' : 'إلغاء حضور'} ليوم ${date}`,
+                                        currentProfile.uid,
+                                        currentProfile.name || 'مسؤول',
+                                        scout.uid,
+                                        scout.name
+                                      );
                                     } catch (error) {
                                       handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
                                     }
@@ -3702,6 +3895,42 @@ enum OperationType {
           </div>
         )}
       </AnimatePresence>
+
+      {/* QR Scanner Modal */}
+      {isScannerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <QRScanner 
+              onScanSuccess={handleScanSuccess} 
+              onClose={() => {
+                setIsScannerOpen(false);
+                setScannerDate(null);
+                setScanLogs([]);
+              }} 
+            />
+            
+            {/* Scan Logs */}
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex-1 overflow-y-auto min-h-[150px]">
+              <h4 className="font-bold text-gray-800 mb-2 text-right">سجل الحضور ({scannerDate})</h4>
+              {scanLogs.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-4">لم يتم مسح أي كود بعد</p>
+              ) : (
+                <ul className="space-y-2">
+                  {scanLogs.map((log, idx) => (
+                    <li key={idx} className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-100 shadow-sm text-sm">
+                      <span className="text-gray-500 text-xs">{log.time}</span>
+                      <span className="font-bold text-green-600 flex items-center gap-1">
+                        {log.name}
+                        <CheckCircle2 size={14} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

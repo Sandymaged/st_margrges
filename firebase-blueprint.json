@@ -32,12 +32,31 @@
         "notes": { "type": "string" }
       },
       "required": ["name", "progress"]
+    },
+    "ActivityLog": {
+      "title": "Activity Log",
+      "description": "Log of administrative actions.",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "adminId": { "type": "string" },
+        "adminName": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserName": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "details", "adminId", "adminName", "timestamp"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
       "description": "Collection of scout and admin profiles."
+    },
+    "/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Collection of activity logs for auditing."
     }
   }
 }

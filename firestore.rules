@@ -65,9 +65,37 @@ service cloud.firestore {
         (!('completedRequirements' in badge) || badge.completedRequirements is list);
     }
 
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "begolbahaa98@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('number', '') == '01555165366' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canManagePermissions', false) == true
+        ))
+      );
+    }
+
+    function isValidActivityLog(data) {
+      return (
+        data.action is string &&
+        data.details is string &&
+        data.adminId is string &&
+        data.adminName is string &&
+        (!('targetUserId' in data) || data.targetUserId is string) &&
+        (!('targetUserName' in data) || data.targetUserName is string) &&
+        data.timestamp is timestamp
+      );
+    }
+
     match /settings/{docId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+    
+    match /activity_logs/{logId} {
+      allow read: if isSuperAdmin();
+      allow create: if isAdmin() && isValidActivityLog(request.resource.data) && request.resource.data.adminId == request.auth.uid;
+      allow update, delete: if false; // Logs are immutable
     }
     
     match /users/{userId} {
