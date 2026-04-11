@@ -81,7 +81,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance'>('categories');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerDate, setScannerDate] = useState<string | null>(null);
-  const [scanLogs, setScanLogs] = useState<{name: string, time: string}[]>([]);
+  const [scanLogs, setScanLogs] = useState<{uid: string, name: string, time: string}[]>([]);
   const [selectedCategoryForEdit, setSelectedCategoryForEdit] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
@@ -522,7 +522,7 @@ enum OperationType {
       });
       
       const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setScanLogs(prev => [{ name: scout.name, time: timeStr }, ...prev]);
+      setScanLogs(prev => [{ uid: scout.uid, name: scout.name, time: timeStr }, ...prev]);
       
       await logActivity(
         'تسجيل غياب (QR)',
@@ -534,6 +534,31 @@ enum OperationType {
       );
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+    }
+  };
+
+  const handleUndoScan = async (scoutUid: string, logIndex: number) => {
+    if (!scannerDate) return;
+    try {
+      await updateDoc(doc(db, 'users', scoutUid), {
+        [`attendance.${scannerDate}`]: false
+      });
+      
+      setScanLogs(prev => prev.filter((_, idx) => idx !== logIndex));
+      
+      const scout = scouts.find(s => s.uid === scoutUid);
+      if (scout) {
+        await logActivity(
+          'إلغاء غياب (QR)',
+          `تم إلغاء حضور ليوم ${scannerDate} من خلال سجل المسح`,
+          currentProfile?.uid || '',
+          currentProfile?.name || 'مسؤول',
+          scout.uid,
+          scout.name
+        );
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${scoutUid}`);
     }
   };
 
@@ -3917,11 +3942,20 @@ enum OperationType {
               ) : (
                 <ul className="space-y-2">
                   {scanLogs.map((log, idx) => (
-                    <li key={idx} className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-100 shadow-sm text-sm">
-                      <span className="text-gray-500 text-xs">{log.time}</span>
-                      <span className="font-bold text-green-600 flex items-center gap-1">
+                    <li key={idx} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm text-sm">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => handleUndoScan(log.uid, idx)}
+                          className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                          title="إلغاء الحضور"
+                        >
+                          <X size={16} />
+                        </button>
+                        <span className="text-gray-500 text-xs font-medium">{log.time}</span>
+                      </div>
+                      <span className="font-bold text-green-600 flex items-center gap-1.5">
                         {log.name}
-                        <CheckCircle2 size={14} />
+                        <CheckCircle2 size={16} />
                       </span>
                     </li>
                   ))}

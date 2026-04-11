@@ -9,6 +9,11 @@ interface QRScannerProps {
 export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const [error, setError] = useState<string>('');
+  const onScanSuccessRef = useRef(onScanSuccess);
+
+  useEffect(() => {
+    onScanSuccessRef.current = onScanSuccess;
+  }, [onScanSuccess]);
 
   useEffect(() => {
     const scanner = new Html5QrcodeScanner(
@@ -22,7 +27,7 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
       (decodedText) => {
         // Pause scanner after success to prevent multiple scans
         scanner.pause(true);
-        onScanSuccess(decodedText);
+        onScanSuccessRef.current(decodedText);
         // Resume after 2 seconds
         setTimeout(() => {
           if (scannerRef.current) {
@@ -40,7 +45,7 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         console.error("Failed to clear html5QrcodeScanner. ", error);
       });
     };
-  }, [onScanSuccess]);
+  }, []); // Empty dependency array to run only once
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">

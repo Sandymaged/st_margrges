@@ -108,14 +108,14 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
           </div>
 
           <div className="hidden md:flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-2xl border border-gray-100">
-            <QRCodeSVG value={profile.uid} size={100} level="H" includeMargin={false} />
+            <QRCodeSVG value={profile.uid} size={150} level="H" includeMargin={false} />
             <span className="text-xs text-gray-500 font-bold">كود الحضور</span>
           </div>
         </div>
         
         {/* Mobile QR Code */}
         <div className="mt-6 md:hidden flex flex-col items-center gap-2 bg-gray-50 p-6 rounded-2xl border border-gray-100">
-          <QRCodeSVG value={profile.uid} size={150} level="H" includeMargin={false} />
+          <QRCodeSVG value={profile.uid} size={200} level="H" includeMargin={false} />
           <span className="text-sm text-gray-500 font-bold">كود الحضور الخاص بك</span>
         </div>
       </div>
