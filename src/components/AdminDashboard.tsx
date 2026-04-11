@@ -3953,61 +3953,63 @@ enum OperationType {
       {/* QR Scanner Modal */}
       {isScannerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-            <QRScanner 
-              onScanSuccess={handleScanSuccess} 
-              onClose={() => {
-                setIsScannerOpen(false);
-                setScannerDate(null);
-                setScanLogs([]);
-              }} 
-            />
-            
-            {/* Scan Logs */}
-            <div className="p-4 bg-gray-50 border-t border-gray-100 flex-1 overflow-y-auto min-h-[150px]">
-              <h4 className="font-bold text-gray-800 mb-2 text-right">سجل الحضور ({scannerDate})</h4>
-              {scanLogs.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-4">لم يتم مسح أي كود بعد</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-right bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
-                    <thead>
-                      <tr className="bg-gray-100 text-gray-700 text-xs">
-                        <th className="p-2 font-bold whitespace-nowrap">التاريخ والوقت</th>
-                        <th className="p-2 font-bold whitespace-nowrap">المسؤول</th>
-                        <th className="p-2 font-bold whitespace-nowrap">الإجراء</th>
-                        <th className="p-2 font-bold whitespace-nowrap">المستخدم المستهدف</th>
-                        <th className="p-2 font-bold"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {scanLogs.map((log, idx) => (
-                        <tr key={idx} className="border-t border-gray-50 hover:bg-gray-50 transition-colors text-sm">
-                          <td className="p-2 text-gray-500 text-xs whitespace-nowrap">{log.time}</td>
-                          <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{currentProfile?.name || 'مسؤول'}</td>
-                          <td className="p-2 whitespace-nowrap">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold inline-block ${log.action === 'إلغاء غياب' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-[#4285F4]'}`}>
-                              {log.action}
-                            </span>
-                          </td>
-                          <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{log.name}</td>
-                          <td className="p-2 text-center">
-                            {log.action === 'تسجيل غياب' && (
-                              <button
-                                onClick={() => handleUndoScan(log.uid, idx)}
-                                className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-                                title="إلغاء الحضور"
-                              >
-                                <X size={16} />
-                              </button>
-                            )}
-                          </td>
+          <div className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex-1 overflow-y-auto">
+              <QRScanner 
+                onScanSuccess={handleScanSuccess} 
+                onClose={() => {
+                  setIsScannerOpen(false);
+                  setScannerDate(null);
+                  setScanLogs([]);
+                }} 
+              />
+              
+              {/* Scan Logs */}
+              <div className="p-4 bg-gray-50 border-t border-gray-100 min-h-[250px]">
+                <h4 className="font-bold text-gray-800 mb-2 text-right">سجل الحضور ({scannerDate})</h4>
+                {scanLogs.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-4">لم يتم مسح أي كود بعد</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
+                      <thead>
+                        <tr className="bg-gray-100 text-gray-700 text-xs">
+                          <th className="p-2 font-bold whitespace-nowrap">التاريخ والوقت</th>
+                          <th className="p-2 font-bold whitespace-nowrap">المسؤول</th>
+                          <th className="p-2 font-bold whitespace-nowrap">الإجراء</th>
+                          <th className="p-2 font-bold whitespace-nowrap">المستخدم المستهدف</th>
+                          <th className="p-2 font-bold"></th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {scanLogs.map((log, idx) => (
+                          <tr key={idx} className="border-t border-gray-50 hover:bg-gray-50 transition-colors text-sm">
+                            <td className="p-2 text-gray-500 text-xs whitespace-nowrap">{log.time}</td>
+                            <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{currentProfile?.name || 'مسؤول'}</td>
+                            <td className="p-2 whitespace-nowrap">
+                              <span className={`px-2 py-1 rounded-full text-xs font-bold inline-block ${log.action === 'إلغاء غياب' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-[#4285F4]'}`}>
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{log.name}</td>
+                            <td className="p-2 text-center">
+                              {log.action === 'تسجيل غياب' && (
+                                <button
+                                  onClick={() => handleUndoScan(log.uid, idx)}
+                                  className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                                  title="إلغاء الحضور"
+                                >
+                                  <X size={16} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
