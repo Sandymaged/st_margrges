@@ -81,7 +81,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance'>('categories');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerDate, setScannerDate] = useState<string | null>(null);
-  const [scanLogs, setScanLogs] = useState<{uid: string, name: string, time: string}[]>([]);
+  const [scanLogs, setScanLogs] = useState<{uid: string, name: string, time: string, action: string}[]>([]);
   const [selectedCategoryForEdit, setSelectedCategoryForEdit] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
@@ -522,7 +522,7 @@ enum OperationType {
       });
       
       const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setScanLogs(prev => [{ uid: scout.uid, name: scout.name, time: timeStr }, ...prev]);
+      setScanLogs(prev => [{ uid: scout.uid, name: scout.name, time: timeStr, action: 'تسجيل غياب' }, ...prev]);
       
       await logActivity(
         'تسجيل غياب (QR)',
@@ -544,7 +544,9 @@ enum OperationType {
         [`attendance.${scannerDate}`]: false
       });
       
-      setScanLogs(prev => prev.filter((_, idx) => idx !== logIndex));
+      setScanLogs(prev => prev.map((log, idx) => 
+        idx === logIndex ? { ...log, action: 'إلغاء غياب' } : log
+      ));
       
       const scout = scouts.find(s => s.uid === scoutUid);
       if (scout) {
@@ -1394,6 +1396,17 @@ enum OperationType {
     }
   };
 
+  const handleDeleteLog = async (logId: string) => {
+    if (!isSuperAdmin) return;
+    if (!window.confirm('هل أنت متأكد من حذف هذا السجل؟')) return;
+    try {
+      await deleteDoc(doc(db, 'activity_logs', logId));
+      setMessage({ type: 'success', text: 'تم حذف السجل بنجاح' });
+    } catch (error) {
+      handleFirestoreError(error, 'delete', `activity_logs/${logId}`);
+    }
+  };
+
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isSuperAdmin || !changingPasswordFor || !newPassword) return;
@@ -1957,29 +1970,45 @@ enum OperationType {
                         <th className="p-4 font-bold">الإجراء</th>
                         <th className="p-4 font-bold">التفاصيل</th>
                         <th className="p-4 font-bold">المستخدم المستهدف</th>
+                        <th className="p-4 font-bold"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {activityLogs.length === 0 ? (
+                      {activityLogs.filter(log => !log.action.includes('غياب')).length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="p-8 text-center text-gray-500 font-bold">
+                          <td colSpan={6} className="p-8 text-center text-gray-500 font-bold">
                             لا توجد نشاطات مسجلة حتى الآن
                           </td>
                         </tr>
                       ) : (
-                        activityLogs.map((log) => (
+                        activityLogs.filter(log => !log.action.includes('غياب')).map((log) => (
                           <tr key={log.id} className="border-t border-gray-50 hover:bg-gray-50 transition-colors">
-                            <td className="p-4 text-sm text-gray-600">
-                              {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-EG') : 'غير متوفر'}
+                            <td className="p-4 text-sm text-gray-600 whitespace-nowrap">
+                              {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-EG', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              }) : 'غير متوفر'}
                             </td>
-                            <td className="p-4 font-bold text-gray-800">{log.adminName}</td>
-                            <td className="p-4">
-                              <span className="px-3 py-1 bg-blue-50 text-[#4285F4] rounded-full text-xs font-bold">
+                            <td className="p-4 font-bold text-gray-800 whitespace-nowrap">{log.adminName}</td>
+                            <td className="p-4 whitespace-nowrap">
+                              <span className="px-3 py-1 bg-blue-50 text-[#4285F4] rounded-full text-xs font-bold inline-block">
                                 {log.action}
                               </span>
                             </td>
                             <td className="p-4 text-sm text-gray-600">{log.details}</td>
-                            <td className="p-4 font-bold text-gray-800">{log.targetUserName || '-'}</td>
+                            <td className="p-4 font-bold text-gray-800 whitespace-nowrap">{log.targetUserName || '-'}</td>
+                            <td className="p-4 text-center">
+                              <button
+                                onClick={() => handleDeleteLog(log.id)}
+                                className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
+                                title="حذف السجل"
+                              >
+                                <X size={18} />
+                              </button>
+                            </td>
                           </tr>
                         ))
                       )}
@@ -3940,26 +3969,44 @@ enum OperationType {
               {scanLogs.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-4">لم يتم مسح أي كود بعد</p>
               ) : (
-                <ul className="space-y-2">
-                  {scanLogs.map((log, idx) => (
-                    <li key={idx} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 shadow-sm text-sm">
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => handleUndoScan(log.uid, idx)}
-                          className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-                          title="إلغاء الحضور"
-                        >
-                          <X size={16} />
-                        </button>
-                        <span className="text-gray-500 text-xs font-medium">{log.time}</span>
-                      </div>
-                      <span className="font-bold text-green-600 flex items-center gap-1.5">
-                        {log.name}
-                        <CheckCircle2 size={16} />
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-700 text-xs">
+                        <th className="p-2 font-bold whitespace-nowrap">التاريخ والوقت</th>
+                        <th className="p-2 font-bold whitespace-nowrap">المسؤول</th>
+                        <th className="p-2 font-bold whitespace-nowrap">الإجراء</th>
+                        <th className="p-2 font-bold whitespace-nowrap">المستخدم المستهدف</th>
+                        <th className="p-2 font-bold"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scanLogs.map((log, idx) => (
+                        <tr key={idx} className="border-t border-gray-50 hover:bg-gray-50 transition-colors text-sm">
+                          <td className="p-2 text-gray-500 text-xs whitespace-nowrap">{log.time}</td>
+                          <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{currentProfile?.name || 'مسؤول'}</td>
+                          <td className="p-2 whitespace-nowrap">
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold inline-block ${log.action === 'إلغاء غياب' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-[#4285F4]'}`}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{log.name}</td>
+                          <td className="p-2 text-center">
+                            {log.action === 'تسجيل غياب' && (
+                              <button
+                                onClick={() => handleUndoScan(log.uid, idx)}
+                                className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                                title="إلغاء الحضور"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
