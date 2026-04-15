@@ -182,6 +182,7 @@ enum OperationType {
 
   useEffect(() => {
     const checkAdminStatus = async () => {
+      if (isOffline) return;
       try {
         const res = await fetch('/api/admin/status');
         const data = await res.json();
@@ -192,7 +193,7 @@ enum OperationType {
       }
     };
     checkAdminStatus();
-  }, []);
+  }, [isOffline]);
 
   const isSuperAdmin = currentProfile?.number === '01555165366' || currentProfile?.email === 'begolbahaa98@gmail.com' || currentProfile?.permissions?.canManagePermissions;
 
