@@ -27,10 +27,16 @@ async function startServer() {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader(
-      "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com;"
-    );
+    
+    // In development, Vite needs unsafe-inline and unsafe-eval for HMR.
+    // In production, we use a stricter CSP.
+    const isProd = process.env.NODE_ENV === "production";
+    const csp = isProd 
+      ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com;"
+      : "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com;";
+    
+    res.setHeader("Content-Security-Policy", csp);
+    
     // Note: X-Frame-Options is omitted here to allow AI Studio preview iframes. 
     // It is enforced in vercel.json for the Vercel deployment.
     next();
@@ -38,6 +44,8 @@ async function startServer() {
 
   // Request logger for API
   app.use("/api", (req, res, next) => {
+    // Prevent caching for API routes
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
     next();
   });
