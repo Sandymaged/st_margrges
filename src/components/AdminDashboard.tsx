@@ -3,7 +3,7 @@ import { db, auth } from '../firebase';
 import { initializeApp, getApp, getApps, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc, serverTimestamp, deleteField, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { 
   ScoutProfile, 
   STAGES, 
@@ -150,6 +150,26 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     error?: string | null;
     availableKeys?: string[];
   } | null>(null);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false);
+      setMessage({ type: 'success', text: 'تم الاتصال بالإنترنت وتم تحديث البيانات' });
+    };
+    const handleOffline = () => {
+      setIsOffline(true);
+      setMessage({ type: 'error', text: 'أنت الآن تعمل بدون إنترنت (أوفلاين). سيتم حفظ التعديلات عند الاتصال.' });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
 enum OperationType {
   GET = 'get',
@@ -583,7 +603,7 @@ enum OperationType {
       secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
       const secondaryAuth = getAuth(secondaryApp);
 
-      const fakeEmail = `${newAccountForm.phone}@scouts.app`;
+      const fakeEmail = `${newAccountForm.phone}@scouts.local`;
       const userCredential = await createUserWithEmailAndPassword(secondaryAuth, fakeEmail, newAccountForm.password);
       const user = userCredential.user;
 
@@ -697,11 +717,25 @@ enum OperationType {
 
           if (changed) {
             const newProgress = calculateBadgeProgress(gradingSelectedBadge, stageReqs, newCompletedReqs, newScores);
-            await updateDoc(doc(db, 'users', scout.uid), {
-              [`badges.${badgeKey}.requirementScores`]: newScores,
-              [`badges.${badgeKey}.completedRequirements`]: newCompletedReqs,
-              [`badges.${badgeKey}.progress`]: newProgress
-            });
+            const firestoreUpdates: Record<string, any> = {};
+            firestoreUpdates[`badges.${badgeKey}.progress`] = newProgress;
+            
+            // requirementScores
+            const origScores = currentBadge.requirementScores || {};
+            for (const req in newScores) {
+              if (newScores[req] !== origScores[req]) {
+                firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = newScores[req];
+              }
+            }
+            
+            // completedRequirements
+            const origCompleted = currentBadge.completedRequirements || [];
+            const added = newCompletedReqs.filter(r => !origCompleted.includes(r));
+            if (added.length > 0) {
+              firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayUnion(...added);
+            }
+
+            await updateDoc(doc(db, 'users', scout.uid), firestoreUpdates);
             await logActivity(
               'تقييم جماعي',
               `تم تحديث تقييم شارة ${gradingSelectedBadge}`,
@@ -814,22 +848,105 @@ enum OperationType {
 
     setEditLoading(true);
     try {
-      const updates: any = {
-        name: editForm.name,
-        number: editForm.number,
-        stage: editForm.stage,
-        badges: editingScout.badges
-      };
+      const originalScout = scouts.find(s => s.uid === editingScout.uid);
+      const firestoreUpdates: Record<string, any> = {};
 
-      await updateDoc(doc(db, 'users', editingScout.uid), updates);
-      await logActivity(
-        'تعديل بيانات',
-        `تم تعديل بيانات المستخدم الأساسية`,
-        currentProfile.uid,
-        currentProfile.name || 'مسؤول',
-        editingScout.uid,
-        editingScout.name
-      );
+      if (originalScout) {
+        if (editForm.name !== originalScout.name) firestoreUpdates.name = editForm.name;
+        if (editForm.number !== originalScout.number) firestoreUpdates.number = editForm.number;
+        if (editForm.stage !== originalScout.stage) firestoreUpdates.stage = editForm.stage;
+
+        // Compare badges
+        const badgeKeys: ('badge1' | 'badge2' | 'badge3')[] = ['badge1', 'badge2', 'badge3'];
+        badgeKeys.forEach(key => {
+          const origBadge = originalScout.badges[key];
+          const newBadge = editingScout.badges[key];
+
+          if (origBadge.name !== newBadge.name) {
+            firestoreUpdates[`badges.${key}.name`] = newBadge.name;
+            // If badge name changed, reset progress
+            firestoreUpdates[`badges.${key}.progress`] = 0;
+            firestoreUpdates[`badges.${key}.completedRequirements`] = [];
+            firestoreUpdates[`badges.${key}.requirementScores`] = {};
+            firestoreUpdates[`badges.${key}.notes`] = '';
+          } else {
+            if (origBadge.progress !== newBadge.progress) firestoreUpdates[`badges.${key}.progress`] = newBadge.progress;
+            if (origBadge.notes !== newBadge.notes) firestoreUpdates[`badges.${key}.notes`] = newBadge.notes;
+
+            // requirementScores
+            const origScores = origBadge.requirementScores || {};
+            const newScores = newBadge.requirementScores || {};
+            for (const req in newScores) {
+              if (newScores[req] !== origScores[req]) {
+                firestoreUpdates[`badges.${key}.requirementScores.${req}`] = newScores[req];
+              }
+            }
+            for (const req in origScores) {
+              if (!(req in newScores)) {
+                firestoreUpdates[`badges.${key}.requirementScores.${req}`] = deleteField();
+              }
+            }
+
+            // completedRequirements
+            const origCompleted = origBadge.completedRequirements || [];
+            const newCompleted = newBadge.completedRequirements || [];
+            const added = newCompleted.filter(r => !origCompleted.includes(r));
+            const removed = origCompleted.filter(r => !newCompleted.includes(r));
+            
+            if (added.length > 0 && removed.length === 0) {
+              firestoreUpdates[`badges.${key}.completedRequirements`] = arrayUnion(...added);
+            } else if (removed.length > 0 && added.length === 0) {
+              firestoreUpdates[`badges.${key}.completedRequirements`] = arrayRemove(...removed);
+            } else if (added.length > 0 && removed.length > 0) {
+              firestoreUpdates[`badges.${key}.completedRequirements`] = newCompleted;
+            }
+          }
+        });
+      } else {
+        // Fallback if original scout not found
+        firestoreUpdates.name = editForm.name;
+        firestoreUpdates.number = editForm.number;
+        firestoreUpdates.stage = editForm.stage;
+        firestoreUpdates.badges = editingScout.badges;
+      }
+
+      if (Object.keys(firestoreUpdates).length > 0) {
+        // If phone number changed, update it in Firebase Auth via API
+        if (firestoreUpdates.number) {
+          const user = auth.currentUser;
+          if (user) {
+            const adminToken = await user.getIdToken();
+            const response = await fetch('/api/admin/update-phone', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                uid: editingScout.uid, 
+                newPhone: firestoreUpdates.number,
+                adminToken 
+              })
+            });
+            if (!response.ok) {
+              const errData = await response.json();
+              console.error('Failed to update phone in Auth:', errData);
+              if (errData.error && errData.error.includes('email-already-exists')) {
+                throw new Error('رقم الهاتف هذا مسجل لحساب آخر بالفعل');
+              }
+              throw new Error(errData.error || 'فشل تحديث رقم الهاتف في نظام الدخول');
+            }
+          }
+        }
+
+        await updateDoc(doc(db, 'users', editingScout.uid), firestoreUpdates);
+        await logActivity(
+          'تعديل بيانات',
+          `تم تعديل بيانات المستخدم الأساسية`,
+          currentProfile.uid,
+          currentProfile.name || 'مسؤول',
+          editingScout.uid,
+          editingScout.name
+        );
+      }
+      
       setMessage({ type: 'success', text: 'تم تحديث البيانات بنجاح' });
       if (closeAfterSave) {
         setEditingScout(null);
@@ -871,19 +988,65 @@ enum OperationType {
         newProgress = calculateBadgeProgress(currentBadge.name, reqs, completedReqs, scores);
       }
 
-      const updatedBadge = {
-        ...currentBadge,
-        ...updates,
-        progress: newProgress
-      };
+      const firestoreUpdates: Record<string, any> = {};
+      
+      // Update progress
+      if (newProgress !== currentBadge.progress) {
+        firestoreUpdates[`badges.${badgeKey}.progress`] = newProgress;
+      }
 
-      console.log('Updating badge for scout:', scout.uid, 'Badge:', badgeKey, 'Data:', updatedBadge);
-      await updateDoc(doc(db, 'users', scout.uid), {
-        [`badges.${badgeKey}`]: updatedBadge
-      });
+      // Update notes
+      if (updates.notes !== undefined && updates.notes !== currentBadge.notes) {
+        firestoreUpdates[`badges.${badgeKey}.notes`] = updates.notes;
+      }
+
+      // Update requirementScores using dot notation for specific fields
+      if (updates.requirementScores !== undefined) {
+        const currentScores = currentBadge.requirementScores || {};
+        const newScores = updates.requirementScores;
+        
+        // Find changed or added scores
+        for (const req in newScores) {
+          if (newScores[req] !== currentScores[req]) {
+            firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = newScores[req];
+          }
+        }
+        // Find deleted scores
+        for (const req in currentScores) {
+          if (!(req in newScores)) {
+            firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = deleteField();
+          }
+        }
+      }
+
+      // Update completedRequirements using arrayUnion and arrayRemove
+      if (updates.completedRequirements !== undefined) {
+        const currentCompleted = currentBadge.completedRequirements || [];
+        const newCompleted = updates.completedRequirements;
+        
+        const added = newCompleted.filter(r => !currentCompleted.includes(r));
+        const removed = currentCompleted.filter(r => !newCompleted.includes(r));
+        
+        if (added.length > 0 && removed.length === 0) {
+           firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayUnion(...added);
+        } else if (removed.length > 0 && added.length === 0) {
+           firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayRemove(...removed);
+        } else if (added.length > 0 && removed.length > 0) {
+           // If both added and removed, just overwrite to be safe
+           firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = newCompleted;
+        }
+      }
+
+      if (Object.keys(firestoreUpdates).length === 0) {
+        return; // Nothing to update
+      }
+
+      console.log('Updating badge for scout:', scout.uid, 'Badge:', badgeKey, 'Updates:', firestoreUpdates);
+      await updateDoc(doc(db, 'users', scout.uid), firestoreUpdates);
+      
       await logActivity(
         'تحديث شارة',
-        `تم تحديث تقييم شارة ${updatedBadge.name}`,
+        `تم تحديث تقييم شارة ${currentBadge.name}`,
         currentProfile.uid,
         currentProfile.name || 'مسؤول',
         scout.uid,
@@ -1466,6 +1629,18 @@ enum OperationType {
 
   return (
     <div className="space-y-6">
+      {isOffline && (
+        <div className="bg-amber-100 border-l-4 border-amber-500 text-amber-700 p-4 rounded-xl shadow-sm flex items-center gap-3">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414" />
+          </svg>
+          <div>
+            <p className="font-bold">أنت الآن تعمل بدون إنترنت (أوفلاين)</p>
+            <p className="text-sm">يمكنك الاستمرار في التقييم، وسيتم مزامنة التعديلات تلقائياً عند عودة الاتصال.</p>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-4 border-b border-gray-200 pb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
         <button

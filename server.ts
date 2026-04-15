@@ -130,6 +130,43 @@ async function startServer() {
     }
   });
 
+  app.post(["/api/admin/update-phone", "/api/admin/update-phone/"], async (req, res) => {
+    console.log("Received update-phone request:", req.body.uid);
+    if (!adminApp) {
+      console.error("Admin SDK not initialized");
+      return res.status(500).json({ error: "Firebase Admin not initialized. Check server logs for details." });
+    }
+
+    const { uid, newPhone, adminToken } = req.body;
+
+    if (!uid || !newPhone) {
+      return res.status(400).json({ error: "UID and newPhone are required." });
+    }
+
+    try {
+      // Verify the requester is an admin
+      const decodedToken = await admin.auth().verifyIdToken(adminToken);
+      
+      // Check if the requester is the super admin
+      const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || decodedToken.email === '01555165366@scouts.local' || decodedToken.phone_number === '+201555165366';
+      
+      if (!isSuperAdmin) {
+        return res.status(403).json({ error: "Unauthorized. Only super admins can change phone numbers." });
+      }
+
+      const fakeEmail = `${newPhone}@scouts.local`;
+      await admin.auth().updateUser(uid, {
+        email: fakeEmail
+      });
+
+      return res.json({ message: "Successfully updated user phone (email)." });
+
+    } catch (error: any) {
+      console.error("Error updating phone:", error);
+      res.status(500).json({ error: error.message || "Failed to update phone." });
+    }
+  });
+
   app.post(["/api/admin/update-password", "/api/admin/update-password/"], async (req, res) => {
     console.log("Received update-password request:", req.body.uid);
     if (!adminApp) {
