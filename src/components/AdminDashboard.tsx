@@ -204,6 +204,7 @@ enum OperationType {
       canDeleteAccounts: true,
       canManageAttendance: true,
       canManagePayments: true,
+      canManageBadgeRequirements: true,
       managedStages: [...STAGES],
       managedBadges: Array.from(new Set((badgeSettings.categories || []).flatMap(c => [
         ...(c.badges || []),
@@ -219,6 +220,7 @@ enum OperationType {
       canDeleteAccounts: false,
       canManageAttendance: false,
       canManagePayments: false,
+      canManageBadgeRequirements: false,
       managedStages: [],
       managedBadges: []
     });
@@ -228,7 +230,8 @@ enum OperationType {
   const canDeleteAccounts = isSuperAdmin || currentProfile?.permissions?.canDeleteAccounts;
   const canManageAttendance = isSuperAdmin || currentProfile?.permissions?.canManageAttendance;
   const canManagePayments = isSuperAdmin || currentProfile?.permissions?.canManagePayments;
-  const canAccessSettings = canManageAllBadges || canManageAttendance || canManagePayments || canDeleteAccounts;
+  const canManageBadgeRequirements = isSuperAdmin || currentProfile?.permissions?.canManageBadgeRequirements;
+  const canAccessSettings = canManageAllBadges || canManageAttendance || canManagePayments || canDeleteAccounts || canManageBadgeRequirements;
   
   const canDeleteThisScout = (scout: ScoutProfile) => {
     if (scout.uid === currentProfile?.uid) return false;
@@ -1613,7 +1616,8 @@ enum OperationType {
   };
 
   const availableTabs = [];
-  if (canManageAllBadges) availableTabs.push('categories', 'requirements');
+  if (canManageAllBadges) availableTabs.push('categories');
+  if (canManageAllBadges || canManageBadgeRequirements) availableTabs.push('requirements');
   if (isSuperAdmin) availableTabs.push('general', 'activity_logs');
   if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
   if (canDeleteAccounts) availableTabs.push('cleanup');
@@ -1685,20 +1689,20 @@ enum OperationType {
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-8">
           <div className="flex gap-4 border-b border-gray-100 pb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
             {canManageAllBadges && (
-              <>
-                <button
-                  onClick={() => setSettingsTab('categories')}
-                  className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'categories' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  تصنيف الشارات
-                </button>
-                <button
-                  onClick={() => setSettingsTab('requirements')}
-                  className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  بنود الشارات
-                </button>
-              </>
+              <button
+                onClick={() => setSettingsTab('categories')}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'categories' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                تصنيف الشارات
+              </button>
+            )}
+            {(canManageAllBadges || canManageBadgeRequirements) && (
+              <button
+                onClick={() => setSettingsTab('requirements')}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                بنود الشارات
+              </button>
             )}
             {isSuperAdmin && (
               <>
@@ -1919,7 +1923,31 @@ enum OperationType {
                     {Array.from(new Set(badgeSettings.categories.flatMap(c => [
                       ...c.badges,
                       ...Object.values(c.stageBadges || {}).flat()
-                    ]))).map(b => (
+                    ])))
+                    .filter(b => {
+                      if (canManageAllBadges) return true;
+                      if (!currentProfile?.permissions) return false;
+                      const { managedBadges, managedStages } = currentProfile.permissions;
+                      
+                      // Explicitly managed badges
+                      if ((managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(b as string))) return true;
+                      
+                      // Badges that belong to managed stages
+                      const isBadgeInManagedStage = (badgeSettings.categories || []).some(cat => {
+                        if ((cat.badges || []).some(cb => normalizeArabic(cb) === normalizeArabic(b as string))) {
+                          return true;
+                        }
+                        return Object.entries(cat.stageBadges || {}).some(([stage, stageBadges]) => {
+                          if ((managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(stage))) {
+                            return ((stageBadges as string[]) || []).some(sb => normalizeArabic(sb) === normalizeArabic(b as string));
+                          }
+                          return false;
+                        });
+                      });
+                      
+                      return isBadgeInManagedStage;
+                    })
+                    .map(b => (
                       <option key={b} value={b}>{b}</option>
                     ))}
                   </select>
@@ -2898,8 +2926,8 @@ enum OperationType {
                             </tr>
                           </thead>
                           <tbody>
-                            {/* Final Score Row (Super Admin and Manage All Badges only) */}
-                            {(isSuperAdmin || canManageAllBadges) && (
+                            {/* Final Score Row */}
+                            {(isSuperAdmin || canManageAllBadges || (canManageBadgeRequirements && canEditBadge(stage as Stage, gradingSelectedBadge))) && (
                               <tr className="bg-blue-50/50 border-b border-blue-100">
                                 <td className="p-4 sticky right-0 bg-blue-50 z-10 border-l border-gray-200 font-black text-[#4285F4] w-[120px] md:w-[200px] min-w-[120px] md:min-w-[200px] max-w-[120px] md:max-w-[200px]">
                                   الدرجة النهائية
@@ -3344,6 +3372,9 @@ enum OperationType {
                                         canManagePermissions: scout.permissions?.canManagePermissions || false,
                                         canManageAllBadges: scout.permissions?.canManageAllBadges || false,
                                         canDeleteAccounts: scout.permissions?.canDeleteAccounts || false,
+                                        canManageAttendance: scout.permissions?.canManageAttendance || false,
+                                        canManagePayments: scout.permissions?.canManagePayments || false,
+                                        canManageBadgeRequirements: scout.permissions?.canManageBadgeRequirements || false,
                                         managedStages: scout.permissions?.managedStages || [],
                                         managedBadges: scout.permissions?.managedBadges || []
                                       });
@@ -3946,6 +3977,20 @@ enum OperationType {
                     <div>
                       <div className="font-bold text-gray-800">إدارة جميع الشارات</div>
                       <div className="text-sm text-gray-500">صلاحية رقم 1: حذف وتعديل في جميع الشارات لجميع المراحل</div>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-3 p-4 border rounded-2xl transition-colors ${permissionsForm.canManagePermissions || permissionsForm.canManageAllBadges ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer hover:bg-gray-50'}`}>
+                    <input
+                      type="checkbox"
+                      disabled={permissionsForm.canManagePermissions || permissionsForm.canManageAllBadges}
+                      checked={permissionsForm.canManagePermissions || permissionsForm.canManageAllBadges || permissionsForm.canManageBadgeRequirements}
+                      onChange={(e) => setPermissionsForm(prev => ({ ...prev, canManageBadgeRequirements: e.target.checked }))}
+                      className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-600 disabled:opacity-50"
+                    />
+                    <div>
+                      <div className="font-bold text-gray-800">إدارة بنود الشارات المحددة</div>
+                      <div className="text-sm text-gray-500">يسمح بإضافة وتعديل بنود الشارات والدرجة النهائية للشارات التي يديرها فقط</div>
                     </div>
                   </label>
 

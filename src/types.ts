@@ -24,6 +24,7 @@ export interface AdminPermissions {
   canDeleteAccounts: boolean;
   canManageAttendance?: boolean;
   canManagePayments?: boolean;
+  canManageBadgeRequirements?: boolean;
   managedStages: Stage[];
   managedBadges: string[];
 }

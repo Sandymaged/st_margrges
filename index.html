@@ -9,19 +9,41 @@
     <script>
       // Filter out expected network errors from the console, especially when testing offline mode
       const originalConsoleError = console.error;
-      console.error = function(...args) {
-        const msg = args.join(' ');
-        if (
+      const originalConsoleWarn = console.warn;
+      const originalConsoleLog = console.log;
+
+      function shouldSuppress(...args) {
+        let msg = '';
+        try {
+          msg = args.map(arg => typeof arg === 'object' && arg !== null ? (arg.message || arg.toString() || JSON.stringify(arg)) : String(arg)).join(' ');
+        } catch (e) {
+          msg = String(args[0]);
+        }
+        
+        return (
           msg.includes('Error processing response text') ||
           msg.includes('Fetch request failed') ||
           msg.includes('The user aborted a request') ||
           msg.includes('signal is aborted without reason') ||
-          msg.includes('Failed to fetch')
-        ) {
-          // Suppress these specific expected network errors
-          return;
-        }
+          msg.includes('Failed to fetch') ||
+          msg.includes('net::ERR_ABORTED') ||
+          msg.includes('net::ERR_CONNECTION_REFUSED')
+        );
+      }
+
+      console.error = function(...args) {
+        if (shouldSuppress(...args)) return;
         originalConsoleError.apply(console, args);
+      };
+      
+      console.warn = function(...args) {
+        if (shouldSuppress(...args)) return;
+        originalConsoleWarn.apply(console, args);
+      };
+
+      console.log = function(...args) {
+        if (shouldSuppress(...args)) return;
+        originalConsoleLog.apply(console, args);
       };
 
       window.addEventListener('unhandledrejection', function(event) {
@@ -29,7 +51,20 @@
         if (
           msg.includes('The user aborted a request') ||
           msg.includes('signal is aborted without reason') ||
-          msg.includes('Failed to fetch')
+          msg.includes('Failed to fetch') ||
+          msg.includes('Error processing response text')
+        ) {
+          event.preventDefault();
+        }
+      });
+
+      window.addEventListener('error', function(event) {
+        const msg = event.message || '';
+        if (
+          msg.includes('The user aborted a request') ||
+          msg.includes('signal is aborted without reason') ||
+          msg.includes('Failed to fetch') ||
+          msg.includes('Error processing response text')
         ) {
           event.preventDefault();
         }
