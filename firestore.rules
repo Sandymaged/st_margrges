@@ -97,7 +97,8 @@ service cloud.firestore {
     match /activity_logs/{logId} {
       allow read: if isSuperAdmin();
       allow create: if isAdmin() && isValidActivityLog(request.resource.data) && request.resource.data.adminId == request.auth.uid;
-      allow update, delete: if false; // Logs are immutable
+      allow update: if false; // Logs are immutable
+      allow delete: if isSuperAdmin();
     }
     
     match /users/{userId} {

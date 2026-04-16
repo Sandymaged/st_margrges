@@ -2,7 +2,7 @@
 // This happens when some polyfills (like formdata-polyfill) try to overwrite window.fetch
 // in an environment where it's read-only (like some iframes).
 (function() {
-  var originalFetch = window.fetch;
+  var originalFetch = window.fetch.bind(window);
   function polyfill(obj) {
     if (!obj) return;
     try {

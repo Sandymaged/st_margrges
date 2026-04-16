@@ -6,6 +6,35 @@
     <link rel="icon" type="image/png" href="/syncc.png" />
     <title>مجموعة مارجرجس الكشفية</title>
     <script src="/fetch-polyfill.js"></script>
+    <script>
+      // Filter out expected network errors from the console, especially when testing offline mode
+      const originalConsoleError = console.error;
+      console.error = function(...args) {
+        const msg = args.join(' ');
+        if (
+          msg.includes('Error processing response text') ||
+          msg.includes('Fetch request failed') ||
+          msg.includes('The user aborted a request') ||
+          msg.includes('signal is aborted without reason') ||
+          msg.includes('Failed to fetch')
+        ) {
+          // Suppress these specific expected network errors
+          return;
+        }
+        originalConsoleError.apply(console, args);
+      };
+
+      window.addEventListener('unhandledrejection', function(event) {
+        const msg = event.reason ? (event.reason.message || event.reason.toString()) : '';
+        if (
+          msg.includes('The user aborted a request') ||
+          msg.includes('signal is aborted without reason') ||
+          msg.includes('Failed to fetch')
+        ) {
+          event.preventDefault();
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
