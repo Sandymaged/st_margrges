@@ -29,8 +29,8 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
     scanner.render(
       (decodedText) => {
         const now = Date.now();
-        // Prevent registering the exact same scan if it happened less than 5 seconds ago
-        if (decodedText === lastScannedText && now - lastScanTime < 5000) {
+        // Prevent registering the exact same scan if it happened less than 1 second ago
+        if (decodedText === lastScannedText && now - lastScanTime < 1000) {
           return;
         }
 
@@ -41,12 +41,12 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         scanner.pause(true);
         onScanSuccessRef.current(decodedText);
         
-        // Resume after 2 seconds
+        // Resume after 1 second
         setTimeout(() => {
           if (scannerRef.current) {
             scannerRef.current.resume();
           }
-        }, 2000);
+        }, 1000);
       },
       (errorMessage) => {
         // Ignore normal scanning errors (e.g. no QR code found)
