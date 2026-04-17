@@ -138,5 +138,11 @@ service cloud.firestore {
         request.auth.token.email == "begolbahaa98@gmail.com"
       );
     }
+    match /deleted_accounts_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow delete: if isAdmin();
+      allow update: if false; // Logs generally shouldn't be edited
+    }
   }
 }

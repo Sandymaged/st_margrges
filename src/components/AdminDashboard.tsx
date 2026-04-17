@@ -3,7 +3,7 @@ import { db, auth } from '../firebase';
 import { initializeApp, getApp, getApps, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc, serverTimestamp, deleteField, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc, serverTimestamp, deleteField, arrayUnion, arrayRemove, writeBatch } from 'firebase/firestore';
 import { 
   ScoutProfile, 
   STAGES, 
@@ -62,7 +62,9 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [activeBadgeTab, setActiveBadgeTab] = useState<'badge1' | 'badge2' | 'badge3'>('badge1');
   const [scouts, setScouts] = useState<ScoutProfile[]>([]);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [deletedAccountsLogs, setDeletedAccountsLogs] = useState<any[]>([]);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
+  const [selectedDeletedLogs, setSelectedDeletedLogs] = useState<string[]>([]);
   const [logDateFilter, setLogDateFilter] = useState('');
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
     categories: DEFAULT_CATEGORIES,
@@ -375,6 +377,7 @@ enum OperationType {
     });
 
     let unsubscribeLogs: any = null;
+    let unsubscribeDeletedLogs: any = null;
     if (isSuperAdmin) {
       unsubscribeLogs = onSnapshot(query(collection(db, 'activity_logs')), (snapshot) => {
         const logs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
@@ -385,6 +388,16 @@ enum OperationType {
         });
         setActivityLogs(logs);
       });
+
+      unsubscribeDeletedLogs = onSnapshot(query(collection(db, 'deleted_accounts_logs')), (snapshot) => {
+        const logs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+        logs.sort((a: any, b: any) => {
+          const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+          const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+          return timeB - timeA;
+        });
+        setDeletedAccountsLogs(logs);
+      });
     }
 
     return () => {
@@ -392,6 +405,7 @@ enum OperationType {
       unsubscribeSettings();
       unsubscribeGeneralSettings();
       if (unsubscribeLogs) unsubscribeLogs();
+      if (unsubscribeDeletedLogs) unsubscribeDeletedLogs();
     };
   }, [isSuperAdmin]);
 
@@ -1516,7 +1530,15 @@ enum OperationType {
     
     setDeleteLoading(true);
     try {
-      // 1. Delete from Firestore
+      // 1. Write custom log to deleted_accounts_logs
+      await setDoc(doc(collection(db, 'deleted_accounts_logs')), {
+        deletedScoutNumber: deletingScout.number || 'بدون رقم',
+        deletedByUid: currentProfile.uid,
+        deletedByName: currentProfile.name || 'مسؤول',
+        timestamp: serverTimestamp()
+      });
+
+      // 2. Delete from Firestore
       await deleteDoc(doc(db, 'users', deletingScout.uid));
       await logActivity(
         'حذف حساب',
@@ -1524,10 +1546,10 @@ enum OperationType {
         currentProfile.uid,
         currentProfile.name || 'مسؤول',
         deletingScout.uid,
-        deletingScout.name
+        'حساب محذوف'
       );
       
-      // 2. Try to delete from Firebase Authentication via our backend API
+      // 3. Try to delete from Firebase Authentication via our backend API
       const user = auth.currentUser;
       if (user) {
         const adminToken = await user.getIdToken();
@@ -1653,7 +1675,7 @@ enum OperationType {
   const availableTabs = [];
   if (canManageAllBadges) availableTabs.push('categories');
   if (canManageAllBadges || canManageBadgeRequirements) availableTabs.push('requirements');
-  if (isSuperAdmin) availableTabs.push('general', 'activity_logs');
+  if (isSuperAdmin) availableTabs.push('general', 'activity_logs', 'deleted_accounts_logs');
   if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
   if (canDeleteAccounts) availableTabs.push('cleanup');
 
@@ -1764,6 +1786,12 @@ enum OperationType {
                   className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'activity_logs' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                 >
                   سجل النشاطات
+                </button>
+                <button
+                  onClick={() => setSettingsTab('deleted_accounts_logs')}
+                  className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'deleted_accounts_logs' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  سجل الحسابات المحذوفة
                 </button>
               </>
             )}
@@ -2334,6 +2362,151 @@ enum OperationType {
                               {isSuperAdmin && (
                                 <button
                                   onClick={() => handleDeleteLog(log.id)}
+                                  className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
+                                  title="حذف السجل"
+                                >
+                                  <X size={18} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : activeSettingsTab === 'deleted_accounts_logs' ? (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-800 mb-2">سجل الحسابات المحذوفة</h2>
+                  <p className="text-gray-500 font-bold">يحتوي على أرقام الحسابات المحذوفة ولمن قام بحذفها.</p>
+                </div>
+                {isSuperAdmin && (
+                  <div className="flex items-center gap-2">
+                    {selectedDeletedLogs.length > 0 && (
+                      <button
+                        onClick={async () => {
+                          if (window.confirm(`هل أنت متأكد من حذف ${selectedDeletedLogs.length} سجل محذوف؟`)) {
+                            try {
+                              for (const id of selectedDeletedLogs) {
+                                await deleteDoc(doc(db, 'deleted_accounts_logs', id));
+                              }
+                              setSelectedDeletedLogs([]);
+                              setMessage({ type: 'success', text: 'تم حذف السجلات المحددة بنجاح' });
+                            } catch (error) {
+                              setMessage({ type: 'error', text: 'حدث خطأ أثناء حذف السجلات' });
+                            }
+                          }
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-xl font-bold hover:bg-red-100 transition-colors shrink-0"
+                      >
+                        <Trash2 size={18} />
+                        <span>حذف المحدد ({selectedDeletedLogs.length})</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={async () => {
+                        if (window.confirm('هل أنت متأكد من حذف جميع سجلات الحسابات المحذوفة نهائياً؟')) {
+                          try {
+                            const batch = writeBatch(db);
+                            deletedAccountsLogs.forEach(log => {
+                              batch.delete(doc(db, 'deleted_accounts_logs', log.id));
+                            });
+                            await batch.commit();
+                            setSelectedDeletedLogs([]);
+                            setMessage({ type: 'success', text: 'تم حذف جميع السجلات بنجاح' });
+                          } catch (error) {
+                            setMessage({ type: 'error', text: 'حدث خطأ أثناء حذف السجلات' });
+                          }
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors shrink-0 shadow-sm"
+                    >
+                      <Trash2 size={18} />
+                      <span className="hidden sm:inline">حذف الكل</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        {isSuperAdmin && (
+                          <th className="p-4 w-12 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedDeletedLogs.length === deletedAccountsLogs.length && deletedAccountsLogs.length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedDeletedLogs(deletedAccountsLogs.map(log => log.id));
+                                } else {
+                                  setSelectedDeletedLogs([]);
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                            />
+                          </th>
+                        )}
+                        <th className="p-4 font-bold text-gray-700 whitespace-nowrap">الوقت والتاريخ</th>
+                        <th className="p-4 font-bold text-gray-700 whitespace-nowrap">قام بالحذف</th>
+                        <th className="p-4 font-bold text-gray-700 whitespace-nowrap">رقم الحساب المحذوف</th>
+                        <th className="p-4 font-bold"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deletedAccountsLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={isSuperAdmin ? 5 : 4} className="p-8 text-center text-gray-500 font-bold">
+                            لا توجد حسابات محذوفة مسجلة
+                          </td>
+                        </tr>
+                      ) : (
+                        deletedAccountsLogs.map((log) => (
+                          <tr key={log.id} className="border-t border-gray-50 hover:bg-gray-50 transition-colors">
+                            {isSuperAdmin && (
+                              <td className="p-4 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedDeletedLogs.includes(log.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedDeletedLogs([...selectedDeletedLogs, log.id]);
+                                    } else {
+                                      setSelectedDeletedLogs(selectedDeletedLogs.filter(id => id !== log.id));
+                                    }
+                                  }}
+                                  className="w-4 h-4 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                                />
+                              </td>
+                            )}
+                            <td className="p-4 text-sm text-gray-600 whitespace-nowrap">
+                              {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-EG', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              }) : 'غير متوفر'}
+                            </td>
+                            <td className="p-4 font-bold text-gray-800 whitespace-nowrap">{log.deletedByName}</td>
+                            <td className="p-4 font-bold text-gray-800 whitespace-nowrap">{log.deletedScoutNumber}</td>
+                            <td className="p-4 text-center">
+                              {isSuperAdmin && (
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await deleteDoc(doc(db, 'deleted_accounts_logs', log.id));
+                                      setMessage({ type: 'success', text: 'تم حذف السجل بنجاح' });
+                                    } catch (error) {
+                                      setMessage({ type: 'error', text: 'حدث خطأ أثناء حذف السجل' });
+                                    }
+                                  }}
                                   className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
                                   title="حذف السجل"
                                 >
