@@ -62,6 +62,8 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [activeBadgeTab, setActiveBadgeTab] = useState<'badge1' | 'badge2' | 'badge3'>('badge1');
   const [scouts, setScouts] = useState<ScoutProfile[]>([]);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
+  const [logDateFilter, setLogDateFilter] = useState('');
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
     categories: DEFAULT_CATEGORIES,
     requirements: {},
@@ -546,10 +548,12 @@ enum OperationType {
       });
       
       const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setScanLogs(prev => [{ uid: scout.uid, name: scout.name, time: timeStr, action: 'تسجيل غياب' }, ...prev]);
+      setScanLogs(prev => [{ uid: scout.uid, name: scout.name, time: timeStr, action: 'تسجيل حضور' }, ...prev]);
       
+      setMessage({ type: 'success', text: `تم تسجيل حضور ${scout.name} بنجاح` });
+
       await logActivity(
-        'تسجيل غياب (QR)',
+        'تسجيل حضور (QR)',
         `تم تسجيل حضور ليوم ${scannerDate} عبر مسح الكود`,
         currentProfile.uid,
         currentProfile.name || 'مسؤول',
@@ -569,13 +573,13 @@ enum OperationType {
       });
       
       setScanLogs(prev => prev.map((log, idx) => 
-        idx === logIndex ? { ...log, action: 'إلغاء غياب' } : log
+        idx === logIndex ? { ...log, action: 'إلغاء حضور' } : log
       ));
       
       const scout = scouts.find(s => s.uid === scoutUid);
       if (scout) {
         await logActivity(
-          'إلغاء غياب (QR)',
+          'إلغاء حضور (QR)',
           `تم إلغاء حضور ليوم ${scannerDate} من خلال سجل المسح`,
           currentProfile?.uid || '',
           currentProfile?.name || 'مسؤول',
@@ -1574,6 +1578,37 @@ enum OperationType {
     }
   };
 
+  const handleDeleteSelectedLogs = async () => {
+    if (!isSuperAdmin || selectedLogs.length === 0) return;
+    if (!window.confirm(`هل أنت متأكد من حذف ${selectedLogs.length} سجل(ات)؟`)) return;
+    try {
+      // In a real production scenario with many records, you'd use a batch. 
+      // Doing it sequentially here since logs amount might not be that huge or batch limits might be hit.
+      // Better to use batch, but for simplicity we can promise.all
+      await Promise.all(selectedLogs.map(logId => deleteDoc(doc(db, 'activity_logs', logId))));
+      setMessage({ type: 'success', text: 'تم حذف السجلات بنجاح' });
+      setSelectedLogs([]);
+    } catch (error) {
+      handleFirestoreError(error, 'delete', 'activity_logs/batch');
+    }
+  };
+
+  const handleDeleteAllFilteredLogs = async () => {
+    if (!isSuperAdmin) return;
+    const logsToDelete = filteredActivityLogs;
+
+    if (logsToDelete.length === 0) return;
+    if (!window.confirm(`هل أنت متأكد من حذف ${logsToDelete.length} سجل(ات) معروضة حاليا؟ هذا الإجراء لا يمكن التراجع عنه.`)) return;
+
+    try {
+      await Promise.all(logsToDelete.map(log => deleteDoc(doc(db, 'activity_logs', log.id))));
+      setMessage({ type: 'success', text: 'تم حذف السجلات بنجاح' });
+      setSelectedLogs([]);
+    } catch (error) {
+      handleFirestoreError(error, 'delete', 'activity_logs/batch');
+    }
+  };
+
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isSuperAdmin || !changingPasswordFor || !newPassword) return;
@@ -1623,6 +1658,18 @@ enum OperationType {
   if (canDeleteAccounts) availableTabs.push('cleanup');
 
   const activeSettingsTab = availableTabs.includes(settingsTab) ? settingsTab : (availableTabs[0] || 'categories');
+
+  const filteredActivityLogs = useMemo(() => {
+    return activityLogs.filter(log => !log.action.includes('غياب') && !log.action.includes('حضور')).filter(log => {
+      if (!logDateFilter) return true;
+      if (!log.timestamp?.toDate) return false;
+      const logDate = log.timestamp.toDate();
+      const [y, m, d] = logDateFilter.split('-');
+      return logDate.getFullYear() === parseInt(y, 10) && 
+             logDate.getMonth() === parseInt(m, 10) - 1 && 
+             logDate.getDate() === parseInt(d, 10);
+    });
+  }, [activityLogs, logDateFilter]);
 
   if (loading) {
     return (
@@ -1925,21 +1972,21 @@ enum OperationType {
                       ...Object.values(c.stageBadges || {}).flat()
                     ])))
                     .filter(b => {
-                      if (canManageAllBadges) return true;
+                      if (canManageAllBadges || isSuperAdmin) return true;
+                      if (!currentProfile?.permissions?.canManageBadgeRequirements) return false;
                       if (!currentProfile?.permissions) return false;
                       const { managedBadges, managedStages } = currentProfile.permissions;
                       
+                      const badgeStr = b as string;
+
                       // Explicitly managed badges
-                      if ((managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(b as string))) return true;
-                      
-                      // Badges that belong to managed stages
+                      if ((managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(badgeStr))) return true;
+
+                      // Badges that belong to explicit managed stages
                       const isBadgeInManagedStage = (badgeSettings.categories || []).some(cat => {
-                        if ((cat.badges || []).some(cb => normalizeArabic(cb) === normalizeArabic(b as string))) {
-                          return true;
-                        }
                         return Object.entries(cat.stageBadges || {}).some(([stage, stageBadges]) => {
                           if ((managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(stage))) {
-                            return ((stageBadges as string[]) || []).some(sb => normalizeArabic(sb) === normalizeArabic(b as string));
+                            return ((stageBadges as string[]) || []).some(sb => normalizeArabic(sb) === normalizeArabic(badgeStr));
                           }
                           return false;
                         });
@@ -1960,193 +2007,211 @@ enum OperationType {
                         بنود شارة: {selectedBadgeForReq}
                       </h3>
 
-                      <div className="space-y-6 mb-6">
-                        {/* All Stages */}
-                        <div>
-                          <h4 className="text-xs font-black text-gray-400 uppercase mb-3 flex items-center gap-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                            لكل المراحل
-                          </h4>
-                          <div className="space-y-4">
-                            {getReqsForStage(selectedBadgeForReq, 'all').length > 0 ? (
-                              Object.entries(
-                                getReqsForStage(selectedBadgeForReq, 'all').reduce((acc: Record<string, string[]>, req: string) => {
-                                  const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
-                                  if (!acc[category]) acc[category] = [];
-                                  acc[category].push(req);
-                                  return acc;
-                                }, {})
-                              ).map(([category, reqs]) => (
-                                <div key={category} className="space-y-2">
-                                  <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
-                                    {category} :-
-                                  </h5>
-                                  {(reqs as string[]).map((req, idx) => (
-                                    <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
-                                      <span className="font-bold text-gray-700 text-sm flex-1">
-                                        {req}
-                                      </span>
-                                      <div className="flex items-center gap-2 shrink-0">
-                                        <button 
-                                          onClick={() => setEditingRequirement({
-                                            badgeName: selectedBadgeForReq,
-                                            oldText: req,
-                                            newText: req,
-                                            category: category,
-                                            stage: 'all'
-                                          })}
-                                          className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                          title="تعديل البند"
-                                        >
-                                          <Edit2 size={16} />
-                                        </button>
-                                        <button 
-                                          onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
-                                          className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                        >
-                                          <Trash2 size={16} />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              ))
-                            ) : (
-                              <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود عامة</p>
-                            )}
-                          </div>
-                        </div>
+                      {(() => {
+                        const hasManagedStages = (currentProfile?.permissions?.managedStages || []).length > 0;
+                        const explicitlyManagesBadge = (currentProfile?.permissions?.managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(selectedBadgeForReq));
+                        const canEditAllStagesForBadge = isSuperAdmin || canManageAllBadges || (!hasManagedStages && explicitlyManagesBadge) || ((currentProfile?.permissions?.managedStages || []).length === STAGES.length);
+                        
+                        const allowedStagesForSelectedBadge = canEditAllStagesForBadge 
+                          ? STAGES 
+                          : STAGES.filter(s => (currentProfile?.permissions?.managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(s)));
 
-                        {/* Specific Stages */}
-                        {STAGES.map(stage => (
-                          <div key={stage}>
-                            <h4 className="text-xs font-black text-[#4285F4] uppercase mb-3 flex items-center gap-2">
-                              <div className="w-1.5 h-1.5 rounded-full bg-[#4285F4]" />
-                              مرحلة: {stage}
-                            </h4>
-                            <div className="space-y-4">
-                              {getReqsForStage(selectedBadgeForReq, stage).length > 0 ? (
-                                Object.entries(
-                                  getReqsForStage(selectedBadgeForReq, stage).reduce((acc: Record<string, string[]>, req: string) => {
-                                    const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
-                                    if (!acc[category]) acc[category] = [];
-                                    acc[category].push(req);
-                                    return acc;
-                                  }, {})
-                                ).map(([category, reqs]) => (
-                                  <div key={category} className="space-y-2">
-                                    <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
-                                      {category} :-
-                                    </h5>
-                                    {(reqs as string[]).map((req, idx) => (
-                                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
-                                        <span className="font-bold text-gray-700 text-sm flex-1">
-                                          {req}
-                                        </span>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          <button 
-                                            onClick={() => setEditingRequirement({
-                                              badgeName: selectedBadgeForReq,
-                                              oldText: req,
-                                              newText: req,
-                                              category: category,
-                                              stage: stage
-                                            })}
-                                            className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                            title="تعديل البند"
-                                          >
-                                            <Edit2 size={16} />
-                                          </button>
-                                          <button 
-                                            onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
-                                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                          >
-                                            <Trash2 size={16} />
-                                          </button>
+                        return (
+                          <>
+                            <div className="space-y-6 mb-6">
+                              {/* All Stages */}
+                              {canEditAllStagesForBadge && (
+                                <div>
+                                  <h4 className="text-xs font-black text-gray-400 uppercase mb-3 flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                                    لكل المراحل
+                                  </h4>
+                                  <div className="space-y-4">
+                                    {getReqsForStage(selectedBadgeForReq, 'all').length > 0 ? (
+                                      Object.entries(
+                                        getReqsForStage(selectedBadgeForReq, 'all').reduce((acc: Record<string, string[]>, req: string) => {
+                                          const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
+                                          if (!acc[category]) acc[category] = [];
+                                          acc[category].push(req);
+                                          return acc;
+                                        }, {})
+                                      ).map(([category, reqs]) => (
+                                        <div key={category} className="space-y-2">
+                                          <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
+                                            {category} :-
+                                          </h5>
+                                          {(reqs as string[]).map((req, idx) => (
+                                            <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
+                                              <span className="font-bold text-gray-700 text-sm flex-1">
+                                                {req}
+                                              </span>
+                                              <div className="flex items-center gap-2 shrink-0">
+                                                <button 
+                                                  onClick={() => setEditingRequirement({
+                                                    badgeName: selectedBadgeForReq,
+                                                    oldText: req,
+                                                    newText: req,
+                                                    category: category,
+                                                    stage: 'all'
+                                                  })}
+                                                  className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                  title="تعديل البند"
+                                                >
+                                                  <Edit2 size={16} />
+                                                </button>
+                                                <button 
+                                                  onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, 'all')}
+                                                  className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                >
+                                                  <Trash2 size={16} />
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ))}
                                         </div>
-                                      </div>
-                                    ))}
+                                      ))
+                                    ) : (
+                                      <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود عامة</p>
+                                    )}
                                   </div>
-                                ))
-                              ) : (
-                                <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود لهذه المرحلة</p>
+                                </div>
                               )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
 
-                      <div className="space-y-3 pt-6 border-t border-gray-200">
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold text-gray-500">اختر المراحل:</label>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedStageForNewReq('all')}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                selectedStageForNewReq === 'all'
-                                  ? 'bg-[#4285F4] text-white'
-                                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              }`}
-                            >
-                              الكل
-                            </button>
-                            {STAGES.map(s => {
-                              const isSelected = selectedStageForNewReq !== 'all' && selectedStageForNewReq.includes(s);
-                              return (
+                              {/* Specific Stages */}
+                              {allowedStagesForSelectedBadge.map(stage => (
+                                <div key={stage}>
+                                  <h4 className="text-xs font-black text-[#4285F4] uppercase mb-3 flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-[#4285F4]" />
+                                    مرحلة: {stage}
+                                  </h4>
+                                  <div className="space-y-4">
+                                    {getReqsForStage(selectedBadgeForReq, stage).length > 0 ? (
+                                      Object.entries(
+                                        getReqsForStage(selectedBadgeForReq, stage).reduce((acc: Record<string, string[]>, req: string) => {
+                                          const category = badgeSettings.requirementCategories?.[selectedBadgeForReq]?.[req] || 'عام';
+                                          if (!acc[category]) acc[category] = [];
+                                          acc[category].push(req);
+                                          return acc;
+                                        }, {})
+                                      ).map(([category, reqs]) => (
+                                        <div key={category} className="space-y-2">
+                                          <h5 className="text-sm font-bold text-[#4285F4] border-b border-gray-100 pb-1 mb-2">
+                                            {category} :-
+                                          </h5>
+                                          {(reqs as string[]).map((req, idx) => (
+                                            <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-gray-100 shadow-sm gap-3">
+                                              <span className="font-bold text-gray-700 text-sm flex-1">
+                                                {req}
+                                              </span>
+                                              <div className="flex items-center gap-2 shrink-0">
+                                                <button 
+                                                  onClick={() => setEditingRequirement({
+                                                    badgeName: selectedBadgeForReq,
+                                                    oldText: req,
+                                                    newText: req,
+                                                    category: category,
+                                                    stage: stage
+                                                  })}
+                                                  className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                  title="تعديل البند"
+                                                >
+                                                  <Edit2 size={16} />
+                                                </button>
+                                                <button 
+                                                  onClick={() => handleRemoveRequirement(selectedBadgeForReq, req, stage)}
+                                                  className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                >
+                                                  <Trash2 size={16} />
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <p className="text-[10px] text-gray-400 italic py-2">لا توجد بنود لهذه المرحلة</p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="space-y-3 pt-6 border-t border-gray-200">
+                              <div className="space-y-2">
+                                <label className="text-xs font-bold text-gray-500">اختر المراحل:</label>
+                                <div className="flex flex-wrap gap-2">
+                                  {canEditAllStagesForBadge && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedStageForNewReq('all')}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                        selectedStageForNewReq === 'all'
+                                          ? 'bg-[#4285F4] text-white'
+                                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                      }`}
+                                    >
+                                      الكل
+                                    </button>
+                                  )}
+                                  {allowedStagesForSelectedBadge.map(s => {
+                                    const isSelected = selectedStageForNewReq !== 'all' && selectedStageForNewReq.includes(s);
+                                    return (
+                                      <button
+                                        key={s}
+                                        type="button"
+                                        onClick={() => {
+                                          if (selectedStageForNewReq === 'all') {
+                                            setSelectedStageForNewReq([s]);
+                                          } else {
+                                            if (isSelected) {
+                                              const newSelection = selectedStageForNewReq.filter(st => st !== s);
+                                              setSelectedStageForNewReq(newSelection.length > 0 ? newSelection : (canEditAllStagesForBadge ? 'all' : [allowedStagesForSelectedBadge[0]]));
+                                            } else {
+                                              setSelectedStageForNewReq([...selectedStageForNewReq, s]);
+                                            }
+                                          }
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                          isSelected
+                                            ? 'bg-[#4285F4] text-white'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        }`}
+                                      >
+                                        {s}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="التصنيف (مثال: روحي، عملي)..."
+                                  value={newRequirementCategory}
+                                  onChange={(e) => setNewRequirementCategory(e.target.value)}
+                                  className="w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="أضف بنداً جديداً..."
+                                  value={newRequirementInput}
+                                  onChange={(e) => setNewRequirementInput(e.target.value)}
+                                  onKeyPress={(e) => e.key === 'Enter' && handleAddRequirement(selectedBadgeForReq, newRequirementInput, selectedStageForNewReq === 'all' && !canEditAllStagesForBadge ? allowedStagesForSelectedBadge : selectedStageForNewReq, newRequirementCategory)}
+                                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                                />
                                 <button
-                                  key={s}
-                                  type="button"
-                                  onClick={() => {
-                                    if (selectedStageForNewReq === 'all') {
-                                      setSelectedStageForNewReq([s]);
-                                    } else {
-                                      if (isSelected) {
-                                        const newSelection = selectedStageForNewReq.filter(st => st !== s);
-                                        setSelectedStageForNewReq(newSelection.length > 0 ? newSelection : 'all');
-                                      } else {
-                                        setSelectedStageForNewReq([...selectedStageForNewReq, s]);
-                                      }
-                                    }
-                                  }}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                    isSelected
-                                      ? 'bg-[#4285F4] text-white'
-                                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                  }`}
+                                  onClick={() => handleAddRequirement(selectedBadgeForReq, newRequirementInput, selectedStageForNewReq === 'all' && !canEditAllStagesForBadge ? allowedStagesForSelectedBadge : selectedStageForNewReq, newRequirementCategory)}
+                                  disabled={!newRequirementInput.trim()}
+                                  className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
                                 >
-                                  {s}
+                                  <Plus size={20} />
+                                  إضافة
                                 </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input
-                            type="text"
-                            placeholder="التصنيف (مثال: روحي، عملي)..."
-                            value={newRequirementCategory}
-                            onChange={(e) => setNewRequirementCategory(e.target.value)}
-                            className="w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
-                          />
-                          <input
-                            type="text"
-                            placeholder="أضف بنداً جديداً..."
-                            value={newRequirementInput}
-                            onChange={(e) => setNewRequirementInput(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && handleAddRequirement(selectedBadgeForReq, newRequirementInput, selectedStageForNewReq, newRequirementCategory)}
-                            className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
-                          />
-                          <button
-                            onClick={() => handleAddRequirement(selectedBadgeForReq, newRequirementInput, selectedStageForNewReq, newRequirementCategory)}
-                            disabled={!newRequirementInput.trim()}
-                            className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
-                          >
-                            <Plus size={20} />
-                            إضافة
-                          </button>
-                        </div>
-                      </div>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div className="h-full flex items-center justify-center p-12 bg-gray-50 rounded-3xl border border-dashed border-gray-200">
@@ -2160,15 +2225,60 @@ enum OperationType {
             </div>
           ) : activeSettingsTab === 'activity_logs' ? (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-2xl font-black text-gray-800 mb-2">سجل النشاطات</h2>
-                <p className="text-gray-500 font-bold">سجل بجميع التعديلات التي تمت على النظام والأفراد.</p>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-800 mb-2">سجل النشاطات</h2>
+                  <p className="text-gray-500 font-bold">سجل بجميع التعديلات التي تمت على النظام والأفراد.</p>
+                </div>
+                
+                {isSuperAdmin && (
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="date"
+                      value={logDateFilter}
+                      onChange={(e) => setLogDateFilter(e.target.value)}
+                      className="px-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold text-gray-700"
+                    />
+                    {selectedLogs.length > 0 && (
+                      <button
+                        onClick={handleDeleteSelectedLogs}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-bold text-sm"
+                      >
+                        <Trash2 size={18} />
+                        حذف المحدد ({selectedLogs.length})
+                      </button>
+                    )}
+                    <button
+                      onClick={handleDeleteAllFilteredLogs}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition-colors font-bold text-sm"
+                    >
+                      <Trash2 size={18} />
+                      حذف الكل
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-right">
                     <thead>
                       <tr className="bg-gray-50 text-gray-700">
+                        {isSuperAdmin && (
+                          <th className="p-4 w-12">
+                            <input
+                              type="checkbox"
+                              checked={filteredActivityLogs.length > 0 && selectedLogs.length === filteredActivityLogs.length}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedLogs(filteredActivityLogs.map(l => l.id));
+                                } else {
+                                  setSelectedLogs([]);
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                            />
+                          </th>
+                        )}
                         <th className="p-4 font-bold">التاريخ والوقت</th>
                         <th className="p-4 font-bold">المسؤول</th>
                         <th className="p-4 font-bold">الإجراء</th>
@@ -2178,15 +2288,31 @@ enum OperationType {
                       </tr>
                     </thead>
                     <tbody>
-                      {activityLogs.filter(log => !log.action.includes('غياب')).length === 0 ? (
+                      {filteredActivityLogs.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="p-8 text-center text-gray-500 font-bold">
+                          <td colSpan={isSuperAdmin ? 7 : 6} className="p-8 text-center text-gray-500 font-bold">
                             لا توجد نشاطات مسجلة حتى الآن
                           </td>
                         </tr>
                       ) : (
-                        activityLogs.filter(log => !log.action.includes('غياب')).map((log) => (
+                        filteredActivityLogs.map((log) => (
                           <tr key={log.id} className="border-t border-gray-50 hover:bg-gray-50 transition-colors">
+                            {isSuperAdmin && (
+                              <td className="p-4">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLogs.includes(log.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedLogs([...selectedLogs, log.id]);
+                                    } else {
+                                      setSelectedLogs(selectedLogs.filter(id => id !== log.id));
+                                    }
+                                  }}
+                                  className="w-4 h-4 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                                />
+                              </td>
+                            )}
                             <td className="p-4 text-sm text-gray-600 whitespace-nowrap">
                               {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-EG', {
                                 year: 'numeric',
@@ -2205,13 +2331,15 @@ enum OperationType {
                             <td className="p-4 text-sm text-gray-600">{log.details}</td>
                             <td className="p-4 font-bold text-gray-800 whitespace-nowrap">{log.targetUserName || '-'}</td>
                             <td className="p-4 text-center">
-                              <button
-                                onClick={() => handleDeleteLog(log.id)}
-                                className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
-                                title="حذف السجل"
-                              >
-                                <X size={18} />
-                              </button>
+                              {isSuperAdmin && (
+                                <button
+                                  onClick={() => handleDeleteLog(log.id)}
+                                  className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
+                                  title="حذف السجل"
+                                >
+                                  <X size={18} />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))
@@ -4209,13 +4337,13 @@ enum OperationType {
                             <td className="p-2 text-gray-500 text-xs whitespace-nowrap">{log.time}</td>
                             <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{currentProfile?.name || 'مسؤول'}</td>
                             <td className="p-2 whitespace-nowrap">
-                              <span className={`px-2 py-1 rounded-full text-xs font-bold inline-block ${log.action === 'إلغاء غياب' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-[#4285F4]'}`}>
+                              <span className={`px-2 py-1 rounded-full text-xs font-bold inline-block ${log.action === 'إلغاء حضور' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-[#4285F4]'}`}>
                                 {log.action}
                               </span>
                             </td>
                             <td className="p-2 font-bold text-gray-800 whitespace-nowrap">{log.name}</td>
                             <td className="p-2 text-center">
-                              {log.action === 'تسجيل غياب' && (
+                              {log.action === 'تسجيل حضور' && (
                                 <button
                                   onClick={() => handleUndoScan(log.uid, idx)}
                                   className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"

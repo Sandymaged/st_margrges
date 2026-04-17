@@ -23,11 +23,24 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
     );
     scannerRef.current = scanner;
 
+    let lastScannedText = '';
+    let lastScanTime = 0;
+
     scanner.render(
       (decodedText) => {
-        // Pause scanner after success to prevent multiple scans
+        const now = Date.now();
+        // Prevent registering the exact same scan if it happened less than 5 seconds ago
+        if (decodedText === lastScannedText && now - lastScanTime < 5000) {
+          return;
+        }
+
+        lastScannedText = decodedText;
+        lastScanTime = now;
+
+        // Pause scanner after success to prevent immediate multiple fires
         scanner.pause(true);
         onScanSuccessRef.current(decodedText);
+        
         // Resume after 2 seconds
         setTimeout(() => {
           if (scannerRef.current) {
