@@ -606,6 +606,18 @@ enum OperationType {
     }
   };
 
+  const findCategoryForBadge = (badgeName: string | undefined): string | null => {
+    if (!badgeName) return null;
+    const cat = (badgeSettings.categories || []).find(c => {
+      const allBadges = [
+        ...(c.badges || []),
+        ...Object.values(c.stageBadges || {}).flat()
+      ];
+      return allBadges.some(b => normalizeArabic(b) === normalizeArabic(badgeName));
+    });
+    return cat ? cat.id : null;
+  };
+
   const handleCreateAccount = async () => {
     if (!isSuperAdmin || creatingAccount) return;
     if (!newAccountForm.name || !newAccountForm.phone || !newAccountForm.password) {
@@ -783,28 +795,30 @@ enum OperationType {
   };
 
   // Helper to get badges for a category and stage
-  const getAvailableBadges = (categoryId: string, scoutStage?: Stage | '') => {
+  const getAvailableBadges = (categoryId: string, scoutStage?: Stage | ''): string[] => {
     const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
     if (!category) return [];
     
     if (scoutStage) {
-      // If there are stage-specific badges configured for ANY stage,
-      // then only return the badges explicitly configured for THIS stage.
-      if (category.stageBadges && Object.keys(category.stageBadges).length > 0) {
+      const badges = new Set<string>(category.badges || []);
+      
+      if (category.stageBadges) {
         const stageKey = Object.keys(category.stageBadges).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
-        return stageKey ? (category.stageBadges[stageKey as Stage] || []) : [];
+        if (stageKey) {
+          const specificBadges = (category.stageBadges[stageKey as Stage] || []) as string[];
+          specificBadges.forEach(b => badges.add(b));
+        }
       }
       
-      // Otherwise return all badges in category
-      return category.badges || [];
+      return Array.from(badges);
     }
 
     // If no stage provided, return all badges in this category across all stages
-    const allBadges = new Set(category.badges || []);
+    const allBadges = new Set<string>(category.badges || []);
     if (category.stageBadges) {
       Object.values(category.stageBadges).forEach(badges => {
         if (Array.isArray(badges)) {
-          badges.forEach(b => allBadges.add(b));
+          (badges as string[]).forEach(b => allBadges.add(b));
         }
       });
     }
@@ -3705,6 +3719,11 @@ enum OperationType {
                                     number: scout.number,
                                     stage: scout.stage
                                   });
+                                  setSelectedCategoryForBadgeSelection({
+                                    badge1: findCategoryForBadge(scout.badges?.badge1?.name) || (badgeSettings.categories?.[0]?.id || 'scout'),
+                                    badge2: findCategoryForBadge(scout.badges?.badge2?.name) || (badgeSettings.categories?.[0]?.id || 'scout'),
+                                    badge3: findCategoryForBadge(scout.badges?.badge3?.name) || (badgeSettings.categories?.[0]?.id || 'scout')
+                                  });
                                 }}
                                 className="p-2 text-[#4285F4] hover:bg-[#4285F4]/10 rounded-xl transition-all"
                                 title="تعديل البيانات"
@@ -4016,10 +4035,6 @@ enum OperationType {
                     const hasReqs = reqs.length > 0;
                     const canEdit = canEditBadge(editingScout.stage, badgeName, editingScout.uid, editingScout.role);
                     
-                    // Badge Selection Logic
-                    const scoutCategory = (badgeSettings.categories || []).find(c => c.id === 'scout');
-                    const otherCategories = (badgeSettings.categories || []).filter(c => c.id !== 'scout');
-                    
                     return (
                     <div key={key} className={`space-y-4 p-6 rounded-3xl border ${canEdit ? 'bg-gray-50 border-gray-100' : 'bg-gray-100/50 border-gray-200 opacity-75'}`}>
                       <div className="flex flex-col gap-4">
@@ -4033,85 +4048,70 @@ enum OperationType {
 
                         {(canManageAllBadges || (currentProfile?.permissions?.managedBadges?.length || 0) > 0 || (currentProfile?.permissions?.managedStages?.length || 0) > 0) && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {key === 'badge1' ? (
-                              <div className="col-span-2">
-                                <label className="text-xs font-bold text-gray-500 mb-1 block">اختر الشارة الكشفية:</label>
-                                <select
-                                  value={badgeName}
-                                  onChange={(e) => {
-                                    const newName = e.target.value;
-                                    setEditingScout(prev => prev ? {
-                                      ...prev,
-                                      badges: {
-                                        ...prev.badges,
-                                        [key]: { name: newName, progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
-                                      }
-                                    } : null);
-                                  }}
-                                  className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white"
-                                >
-                                  <option value="">-- اختر شارة --</option>
-                                  {getAvailableBadges('scout', editingScout.stage)
-                                    .filter(b => canManageAllBadges || canEditBadge(editingScout.stage, b))
-                                    .map(b => <option key={b} value={b} disabled={b === editingScout.badges.badge2.name || b === editingScout.badges.badge3.name}>{b}</option>)}
-                                </select>
-                              </div>
-                            ) : (
-                              <>
-                                <div>
-                                  <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر التصنيف:</label>
-                                  <select
-                                    value={selectedCategoryForBadgeSelection[key] || ''}
-                                    onChange={(e) => {
-                                      const newCategory = e.target.value;
-                                      setSelectedCategoryForBadgeSelection(prev => ({ ...prev, [key]: newCategory }));
-                                      setEditingScout(prev => prev ? {
-                                        ...prev,
-                                        badges: {
-                                          ...prev.badges,
-                                          [key]: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
-                                        }
-                                      } : null);
-                                    }}
-                                    className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white"
-                                  >
-                                    <option value="">-- اختر تصنيف --</option>
-                                    {(badgeSettings.categories || [])
-                                      .filter(c => {
-                                        if (canManageAllBadges) return true;
-                                        const catBadges = [...(c.badges || []), ...Object.values(c.stageBadges || {}).flat()];
-                                        return catBadges.some(b => canEditBadge(editingScout.stage, b));
-                                      })
-                                      .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر الشارة:</label>
-                                  <select
-                                    disabled={!selectedCategoryForBadgeSelection[key]}
-                                    value={badgeName}
-                                    onChange={(e) => {
-                                      const newName = e.target.value;
-                                      setEditingScout(prev => prev ? {
-                                        ...prev,
-                                        badges: {
-                                          ...prev.badges,
-                                          [key]: { name: newName, progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
-                                        }
-                                      } : null);
-                                    }}
-                                    className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white disabled:bg-gray-50"
-                                  >
-                                    <option value="">-- اختر شارة --</option>
-                                    {selectedCategoryForBadgeSelection[key] && getAvailableBadges(selectedCategoryForBadgeSelection[key]!, editingScout.stage)
-                                      .filter(b => canManageAllBadges || canEditBadge(editingScout.stage, b))
-                                      .map(b => (
-                                        <option key={b} value={b} disabled={b === editingScout.badges[key === 'badge2' ? 'badge1' : 'badge1'].name || b === editingScout.badges[key === 'badge2' ? 'badge3' : 'badge2'].name}>{b}</option>
-                                      ))}
-                                  </select>
-                                </div>
-                              </>
-                            )}
+                            <div>
+                              <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر التصنيف:</label>
+                              <select
+                                value={selectedCategoryForBadgeSelection[key] || ''}
+                                onChange={(e) => {
+                                  const newCategory = e.target.value;
+                                  setSelectedCategoryForBadgeSelection(prev => ({ ...prev, [key]: newCategory }));
+                                  setEditingScout(prev => prev ? {
+                                    ...prev,
+                                    badges: {
+                                      ...prev.badges,
+                                      [key]: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
+                                    }
+                                  } : null);
+                                }}
+                                className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white"
+                              >
+                                <option value="">-- اختر تصنيف --</option>
+                                {(badgeSettings.categories || [])
+                                  .filter(c => {
+                                    if (canManageAllBadges) return true;
+                                    const catBadges = [...(c.badges || []), ...Object.values(c.stageBadges || {}).flat()];
+                                    return catBadges.some(b => canEditBadge(editingScout.stage, b));
+                                  })
+                                  .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر الشارة:</label>
+                              <select
+                                disabled={!selectedCategoryForBadgeSelection[key]}
+                                value={badgeName}
+                                onChange={(e) => {
+                                  const newName = e.target.value;
+                                  setEditingScout(prev => prev ? {
+                                    ...prev,
+                                    badges: {
+                                      ...prev.badges,
+                                      [key]: { name: newName, progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
+                                    }
+                                  } : null);
+                                }}
+                                className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white disabled:bg-gray-50"
+                              >
+                                <option value="">-- اختر شارة --</option>
+                                {(() => {
+                                  if (!selectedCategoryForBadgeSelection[key]) return null;
+                                  // Pass empty string to get ALL badges in category, then filter by permissions
+                                  const available = getAvailableBadges(selectedCategoryForBadgeSelection[key]!, '')
+                                    .filter(b => canManageAllBadges || canEditBadge(editingScout.stage, b));
+                                  // Ensure current badgeName is in the options list to prevent empty dropdowns if the badge was deleted or moved
+                                  if (badgeName && !available.includes(badgeName)) {
+                                    available.push(badgeName);
+                                  }
+                                  return available.map(b => {
+                                    const otherKey1 = key === 'badge1' ? 'badge2' : (key === 'badge2' ? 'badge1' : 'badge1');
+                                    const otherKey2 = key === 'badge1' ? 'badge3' : (key === 'badge2' ? 'badge3' : 'badge2');
+                                    return (
+                                      <option key={b} value={b} disabled={b === editingScout.badges[otherKey1].name || b === editingScout.badges[otherKey2].name}>{b}</option>
+                                    );
+                                  });
+                                })()}
+                              </select>
+                            </div>
                           </div>
                         )}
 
