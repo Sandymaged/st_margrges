@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, setDoc } from 'firebase/firestore';
 import { ScoutProfile, GeneralSettings } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
@@ -84,10 +84,37 @@ export default function App() {
       if (snapshot.exists()) {
         const data = snapshot.data() as ScoutProfile;
         setProfile(data);
-        
-        // Super Admin status is checked in components
       } else {
-        setProfile(null);
+        if (user.email === 'begolbahaa98@gmail.com' || user.email === '01555165366@scouts.local' || user.phoneNumber === '+201555165366') {
+          const adminProfile: ScoutProfile = {
+            uid: user.uid,
+            name: 'مسؤول النظام',
+            stage: 'قادة',
+            role: 'admin',
+            number: '01555165366',
+            email: user.email || 'begolbahaa98@gmail.com',
+            isVerified: true,
+            createdAt: new Date(),
+            badges: {
+              badge1: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} },
+              badge2: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} },
+              badge3: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
+            },
+            joinDate: new Date(),
+            permissions: {
+              canManagePermissions: true,
+              canManageAllBadges: true,
+              canManagePayments: true,
+              canManageBadgeRequirements: true,
+              canDeleteAccounts: true,
+              managedStages: ['أشبال', 'زهرات', 'كشاف', 'مرشدات', 'متقدم', 'رائدات', 'قادة'],
+              managedBadges: []
+            }
+          };
+          setDoc(doc(db, 'users', user.uid), adminProfile).catch(console.error);
+        } else {
+          setProfile(null);
+        }
       }
       setLoading(false);
     }, (error) => {
@@ -163,7 +190,7 @@ export default function App() {
             exit={{ opacity: 0, y: -15 }}
             transition={{ duration: 0.3 }}
           >
-            {profile.role === 'admin' && view === 'dashboard' ? (
+            {(profile.role === 'admin' || profile.email === 'begolbahaa98@gmail.com' || profile.number === '01555165366') && view === 'dashboard' ? (
               <AdminDashboard currentProfile={profile} />
             ) : (
               <ScoutProfileView profile={profile} />

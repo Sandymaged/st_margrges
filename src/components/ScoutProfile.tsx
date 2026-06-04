@@ -55,7 +55,19 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return 'غير متوفر';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    let date: Date;
+    if (timestamp.toDate) {
+      date = timestamp.toDate();
+    } else if (timestamp._seconds) {
+      date = new Date(timestamp._seconds * 1000);
+    } else if (timestamp.seconds) {
+      date = new Date(timestamp.seconds * 1000);
+    } else {
+      date = new Date(timestamp);
+    }
+    
+    if (isNaN(date.getTime())) return 'غير متوفر';
+
     return date.toLocaleDateString('ar-EG', {
       year: 'numeric',
       month: 'long',

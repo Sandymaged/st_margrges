@@ -3,7 +3,10 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 
+// Use environment variables (Vercel will provide these in production)
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,27 +23,25 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  // Enhance security with Helmet
+  // Note: we customize the CSP to be compatible with Vite in dev, and AI Studio
+  const isProd = process.env.NODE_ENV === "production";
 
-  // Security Headers
-  app.use((req, res, next) => {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-XSS-Protection", "1; mode=block");
-    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    
-    // In development, Vite needs unsafe-inline and unsafe-eval for HMR.
-    // In production, we use a stricter CSP.
-    const isProd = process.env.NODE_ENV === "production";
-    const csp = isProd 
-      ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com;"
-      : "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com;";
-    
-    res.setHeader("Content-Security-Policy", csp);
-    
-    // Note: X-Frame-Options is omitted here to allow AI Studio preview iframes. 
-    // It is enforced in vercel.json for the Vercel deployment.
-    next();
+  app.set("trust proxy", 1);
+
+  // Rate limiting to prevent abuse
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    message: { error: "Too many requests, please try again later." }
   });
+
+  // Apply rate limiter specifically to /api routes
+  app.use("/api", apiLimiter);
+
+  app.use(express.json());
 
   // Request logger for API
   app.use("/api", (req, res, next) => {

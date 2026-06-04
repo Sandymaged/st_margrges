@@ -199,7 +199,11 @@ enum OperationType {
     checkAdminStatus();
   }, [isOffline]);
 
-  const isSuperAdmin = currentProfile?.number === '01555165366' || currentProfile?.email === 'begolbahaa98@gmail.com' || currentProfile?.permissions?.canManagePermissions;
+  const isSuperAdmin = 
+    currentProfile?.number === '01555165366' || 
+    currentProfile?.email === 'begolbahaa98@gmail.com' ||
+    currentProfile?.email === '01555165366@scouts.local' ||
+    currentProfile?.permissions?.canManagePermissions;
 
   const handleGrantAllPermissions = () => {
     setPermissionsForm({
@@ -419,17 +423,18 @@ enum OperationType {
       const stageScouts = scouts.filter(s => {
         if (s.stage !== stage) return false;
         const normalizedBadge = normalizeArabic(gradingSelectedBadge);
-        const hasBadge = normalizeArabic(s.badges.badge1.name) === normalizedBadge || 
-                         normalizeArabic(s.badges.badge2.name) === normalizedBadge || 
-                         normalizeArabic(s.badges.badge3.name) === normalizedBadge;
+        const hasBadge = normalizeArabic(s.badges?.badge1?.name) === normalizedBadge || 
+                         normalizeArabic(s.badges?.badge2?.name) === normalizedBadge || 
+                         normalizeArabic(s.badges?.badge3?.name) === normalizedBadge;
         if (!hasBadge) return false;
 
         // Apply filter if active
         if (badgePassFilter !== 'all') {
-          const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
-                         : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+          const badgeKey = s.badges?.badge1?.name === gradingSelectedBadge ? 'badge1' 
+                         : s.badges?.badge2?.name === gradingSelectedBadge ? 'badge2' 
                          : 'badge3';
-          const badge = s.badges[badgeKey];
+          const badge = s.badges?.[badgeKey];
+          if (!badge) return false;
           const hasPassed = checkBadgePassStatus(gradingSelectedBadge, stageReqs, badge.completedRequirements || [], badge.requirementScores || {});
           
           if (badgePassFilter === 'passed' && !hasPassed) return false;
@@ -442,10 +447,11 @@ enum OperationType {
       if (stageScouts.length === 0) return;
 
       const data = stageScouts.map(s => {
-        const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
-                       : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+        const badgeKey = s.badges?.badge1?.name === gradingSelectedBadge ? 'badge1' 
+                       : s.badges?.badge2?.name === gradingSelectedBadge ? 'badge2' 
                        : 'badge3';
-        const badge = s.badges[badgeKey];
+        const badge = s.badges?.[badgeKey];
+        if (!badge) return { name: s.name, number: s.number, stage: s.stage, totalScore: 0, status: 'لم يكتمل' };
         const scores = badge.requirementScores || {};
         
         const row: any = {
@@ -826,47 +832,52 @@ enum OperationType {
   };
 
   const filteredAndSortedScouts = useMemo(() => {
-    return scouts
-      .filter(s => {
-        // If not super admin, hide other admins and only show scouts they have permission to see
-        if (!isSuperAdmin) {
-          if (s.role === 'admin' && s.uid !== currentProfile?.uid) return false;
-          // If it's a scout, check if they manage the stage or if they can edit at least one of their badges
-          if (s.role !== 'admin' && !canEditScout(s)) return false;
-        }
+    try {
+      return scouts
+        .filter(s => {
+          // If not super admin, hide other admins and only show scouts they have permission to see
+          if (!isSuperAdmin) {
+            if (s.role === 'admin' && s.uid !== currentProfile?.uid) return false;
+            // If it's a scout, check if they manage the stage or if they can edit at least one of their badges
+            if (s.role !== 'admin' && !canEditScout(s)) return false;
+          }
 
-        const normalizedSearch = normalizeNumbers(searchTerm);
-        const matchesSearch = (s.name && s.name.toLowerCase().includes(searchTerm.toLowerCase())) || 
-                             (s.number && s.number.includes(normalizedSearch));
-        const matchesStage = !stageFilter || normalizeArabic(s.stage) === normalizeArabic(stageFilter);
-        
-        // Category Filter
-        let matchesCategory = true;
-        if (categoryFilter) {
-          const availableBadgesInCategory = getAvailableBadges(categoryFilter, s.stage);
-          matchesCategory = availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges.badge1.name)) ||
-                            availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges.badge2.name)) ||
-                            availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges.badge3.name));
-        }
+          const normalizedSearch = normalizeNumbers(searchTerm);
+          const matchesSearch = (s.name && s.name.toLowerCase().includes(searchTerm.toLowerCase())) || 
+                              (s.number && s.number.includes(normalizedSearch));
+          const matchesStage = !stageFilter || normalizeArabic(s.stage) === normalizeArabic(stageFilter);
+          
+          // Category Filter
+          let matchesCategory = true;
+          if (categoryFilter) {
+            const availableBadgesInCategory = getAvailableBadges(categoryFilter, s.stage);
+            matchesCategory = availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges?.badge1?.name)) ||
+                              availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges?.badge2?.name)) ||
+                              availableBadgesInCategory.some(b => normalizeArabic(b) === normalizeArabic(s.badges?.badge3?.name));
+          }
 
-        const matchesBadge = !badgeFilter || 
-                            normalizeArabic(s.badges.badge1.name) === normalizeArabic(badgeFilter) || 
-                            normalizeArabic(s.badges.badge2.name) === normalizeArabic(badgeFilter) || 
-                            normalizeArabic(s.badges.badge3.name) === normalizeArabic(badgeFilter);
+          const matchesBadge = !badgeFilter || 
+                              normalizeArabic(s.badges?.badge1?.name) === normalizeArabic(badgeFilter) || 
+                              normalizeArabic(s.badges?.badge2?.name) === normalizeArabic(badgeFilter) || 
+                              normalizeArabic(s.badges?.badge3?.name) === normalizeArabic(badgeFilter);
 
-        return matchesSearch && matchesStage && matchesCategory && matchesBadge;
-      })
-      .sort((a, b) => {
-        let comparison = 0;
-        if (sortField === 'name') {
-          comparison = a.name.localeCompare(b.name);
-        } else {
-          const dateA = a.joinDate || a.createdAt;
-          const dateB = b.joinDate || b.createdAt;
-          comparison = (dateA?.seconds || 0) - (dateB?.seconds || 0);
-        }
-        return sortOrder === 'asc' ? comparison : -comparison;
-      });
+          return matchesSearch && matchesStage && matchesCategory && matchesBadge;
+        })
+        .sort((a, b) => {
+          let comparison = 0;
+          if (sortField === 'name') {
+            comparison = a.name.localeCompare(b.name);
+          } else {
+            const dateA = a.joinDate || a.createdAt;
+            const dateB = b.joinDate || b.createdAt;
+            comparison = (dateA?.seconds || 0) - (dateB?.seconds || 0);
+          }
+          return sortOrder === 'asc' ? comparison : -comparison;
+        });
+    } catch (err) {
+      console.error('Error filtering scouts:', err);
+      return [];
+    }
   }, [scouts, searchTerm, stageFilter, categoryFilter, badgeFilter, sortField, sortOrder, currentProfile, isSuperAdmin, badgeSettings]);
 
   const handleUpdateScout = async (e?: React.FormEvent, closeAfterSave = true) => {
@@ -3095,7 +3106,7 @@ enum OperationType {
               >
                 <option value="">اختر الشارة للتقييم</option>
                 {Array.from(new Set([
-                  ...scouts.flatMap(s => [s.badges.badge1.name, s.badges.badge2.name, s.badges.badge3.name]),
+                  ...scouts.flatMap(s => [s.badges?.badge1?.name, s.badges?.badge2?.name, s.badges?.badge3?.name]),
                   ...(badgeSettings.categories || []).flatMap(c => [
                     ...(c.badges || []),
                     ...Object.values(c.stageBadges || {}).flat()
@@ -3222,9 +3233,9 @@ enum OperationType {
                   const stageScoutsWithBadge = scouts.filter(s => {
                     if (s.stage !== stage) return false;
                     const normalizedBadge = normalizeArabic(gradingSelectedBadge);
-                    const hasBadge = normalizeArabic(s.badges.badge1.name) === normalizedBadge || 
-                                     normalizeArabic(s.badges.badge2.name) === normalizedBadge || 
-                                     normalizeArabic(s.badges.badge3.name) === normalizedBadge;
+                    const hasBadge = normalizeArabic(s.badges?.badge1?.name) === normalizedBadge || 
+                                     normalizeArabic(s.badges?.badge2?.name) === normalizedBadge || 
+                                     normalizeArabic(s.badges?.badge3?.name) === normalizedBadge;
                     if (!hasBadge) return false;
                     return canEditBadge(s.stage, gradingSelectedBadge, s.uid, s.role);
                   });
@@ -3247,10 +3258,11 @@ enum OperationType {
                   const filteredScouts = stageScoutsWithBadge.filter(s => {
                     // Apply filter if active
                     if (badgePassFilter !== 'all') {
-                      const badgeKey = s.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
-                                     : s.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+                      const badgeKey = s.badges?.badge1?.name === gradingSelectedBadge ? 'badge1' 
+                                     : s.badges?.badge2?.name === gradingSelectedBadge ? 'badge2' 
                                      : 'badge3';
-                      const badge = s.badges[badgeKey];
+                      const badge = s.badges?.[badgeKey];
+                      if (!badge) return false;
                       const hasPassed = checkBadgePassStatus(gradingSelectedBadge, stageReqs, badge.completedRequirements || [], badge.requirementScores || {});
                       
                       if (badgePassFilter === 'passed' && !hasPassed) return false;
@@ -3536,7 +3548,8 @@ enum OperationType {
               <div>
                 <p className="text-sm font-bold text-gray-500">شارات قيد التقدم</p>
                 <h3 className="text-2xl font-black text-gray-800">
-                  {scouts.reduce((acc, s) => acc + [s.badges.badge1, s.badges.badge2, s.badges.badge3].filter(b => {
+                  {scouts.reduce((acc, s) => acc + [s.badges?.badge1, s.badges?.badge2, s.badges?.badge3].filter(b => {
+                    if (!b || !b.name) return false;
                     const reqs = getScoutBadgeRequirements(b.name, s.stage);
                     const hasReqs = reqs.length > 0;
                     const completedReqs = (b.completedRequirements || []).filter(r => reqs.includes(r));
@@ -3702,7 +3715,13 @@ enum OperationType {
                           {(() => {
                             const timestamp = scout.joinDate || scout.createdAt;
                             if (!timestamp) return 'غير متوفر';
-                            const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+                            let date: Date;
+                            if (timestamp.toDate) date = timestamp.toDate();
+                            else if (timestamp._seconds) date = new Date(timestamp._seconds * 1000);
+                            else if (timestamp.seconds) date = new Date(timestamp.seconds * 1000);
+                            else date = new Date(timestamp);
+                            
+                            if (isNaN(date.getTime())) return 'غير متوفر';
                             return date.toLocaleDateString('ar-EG');
                           })()}
                         </div>
@@ -4047,38 +4066,10 @@ enum OperationType {
                         </div>
 
                         {(canManageAllBadges || (currentProfile?.permissions?.managedBadges?.length || 0) > 0 || (currentProfile?.permissions?.managedStages?.length || 0) > 0) && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="flex flex-col gap-3">
                             <div>
-                              <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر التصنيف:</label>
+                              <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">تغيير الشارة:</label>
                               <select
-                                value={selectedCategoryForBadgeSelection[key] || ''}
-                                onChange={(e) => {
-                                  const newCategory = e.target.value;
-                                  setSelectedCategoryForBadgeSelection(prev => ({ ...prev, [key]: newCategory }));
-                                  setEditingScout(prev => prev ? {
-                                    ...prev,
-                                    badges: {
-                                      ...prev.badges,
-                                      [key]: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
-                                    }
-                                  } : null);
-                                }}
-                                className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white"
-                              >
-                                <option value="">-- اختر تصنيف --</option>
-                                {(badgeSettings.categories || [])
-                                  .filter(c => {
-                                    if (canManageAllBadges) return true;
-                                    const catBadges = [...(c.badges || []), ...Object.values(c.stageBadges || {}).flat()];
-                                    return catBadges.some(b => canEditBadge(editingScout.stage, b));
-                                  })
-                                  .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">اختر الشارة:</label>
-                              <select
-                                disabled={!selectedCategoryForBadgeSelection[key]}
                                 value={badgeName}
                                 onChange={(e) => {
                                   const newName = e.target.value;
@@ -4090,26 +4081,39 @@ enum OperationType {
                                     }
                                   } : null);
                                 }}
-                                className="w-full px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm bg-white disabled:bg-gray-50"
+                                className="w-full px-4 py-3 rounded-xl border border-gray-200 font-bold text-sm bg-white hover:border-[#4285F4] transition-colors focus:ring-2 focus:ring-[#4285F4]/20 outline-none"
                               >
                                 <option value="">-- اختر شارة --</option>
-                                {(() => {
-                                  if (!selectedCategoryForBadgeSelection[key]) return null;
-                                  // Pass empty string to get ALL badges in category, then filter by permissions
-                                  const available = getAvailableBadges(selectedCategoryForBadgeSelection[key]!, '')
-                                    .filter(b => canManageAllBadges || canEditBadge(editingScout.stage, b));
-                                  // Ensure current badgeName is in the options list to prevent empty dropdowns if the badge was deleted or moved
-                                  if (badgeName && !available.includes(badgeName)) {
+                                {(badgeSettings.categories || []).map(c => {
+                                  const cBadges = Array.from(new Set([
+                                    ...(c.badges || []),
+                                    ...Object.values(c.stageBadges || {}).flat()
+                                  ] as string[]));
+                                  
+                                  const available = cBadges.filter(b => canManageAllBadges || canEditBadge(editingScout.stage, b));
+                                  if (available.length === 0) return null;
+
+                                  if (badgeName && cBadges.includes(badgeName) && !available.includes(badgeName)) {
                                     available.push(badgeName);
                                   }
-                                  return available.map(b => {
-                                    const otherKey1 = key === 'badge1' ? 'badge2' : (key === 'badge2' ? 'badge1' : 'badge1');
-                                    const otherKey2 = key === 'badge1' ? 'badge3' : (key === 'badge2' ? 'badge3' : 'badge2');
-                                    return (
-                                      <option key={b} value={b} disabled={b === editingScout.badges[otherKey1].name || b === editingScout.badges[otherKey2].name}>{b}</option>
-                                    );
-                                  });
-                                })()}
+
+                                  return (
+                                    <optgroup key={c.id} label={c.name}>
+                                      {available.map(b => {
+                                        const otherKey1 = key === 'badge1' ? 'badge2' : (key === 'badge2' ? 'badge1' : 'badge1');
+                                        const otherKey2 = key === 'badge1' ? 'badge3' : (key === 'badge2' ? 'badge3' : 'badge2');
+                                        return (
+                                          <option key={b} value={b} disabled={b === editingScout.badges[otherKey1].name || b === editingScout.badges[otherKey2].name}>{b}</option>
+                                        );
+                                      })}
+                                    </optgroup>
+                                  );
+                                })}
+                                {badgeName && !findCategoryForBadge(badgeName) && (
+                                  <optgroup label="أخرى (غير مصنفة)">
+                                    <option value={badgeName}>{badgeName}</option>
+                                  </optgroup>
+                                )}
                               </select>
                             </div>
                           </div>
