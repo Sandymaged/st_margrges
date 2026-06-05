@@ -35,10 +35,13 @@ export default function Layout({ children, user, profile, view, setView, general
     }
   };
 
+  const adminPhone = import.meta.env.VITE_SUPER_ADMIN_PHONE;
+  const adminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL;
+
   const isSuperAdmin = 
-    profile?.number === '01555165366' || 
-    profile?.email === 'begolbahaa98@gmail.com' || 
-    profile?.email === '01555165366@scouts.local' ||
+    (adminPhone && profile?.number === adminPhone) || 
+    (adminEmail && profile?.email === adminEmail) || 
+    (adminPhone && profile?.email === `${adminPhone}@scouts.local`) ||
     profile?.permissions?.canManagePermissions;
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

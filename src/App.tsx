@@ -85,14 +85,22 @@ export default function App() {
         const data = snapshot.data() as ScoutProfile;
         setProfile(data);
       } else {
-        if (user.email === 'begolbahaa98@gmail.com' || user.email === '01555165366@scouts.local' || user.phoneNumber === '+201555165366') {
+        const adminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL;
+        const adminPhone = import.meta.env.VITE_SUPER_ADMIN_PHONE;
+        const isSuperAdmin = 
+          (adminEmail && user.email === adminEmail) || 
+          (adminPhone && user.email === `${adminPhone}@scouts.local`) || 
+          (adminPhone && user.phoneNumber === `+20${adminPhone.replace(/^0+/, '')}`) ||
+          (adminPhone && user.phoneNumber === `+${adminPhone}`);
+
+        if (isSuperAdmin) {
           const adminProfile: ScoutProfile = {
             uid: user.uid,
             name: 'مسؤول النظام',
             stage: 'قادة',
             role: 'admin',
-            number: '01555165366',
-            email: user.email || 'begolbahaa98@gmail.com',
+            number: adminPhone || '0',
+            email: user.email || adminEmail || '',
             isVerified: true,
             createdAt: new Date(),
             badges: {
@@ -190,7 +198,9 @@ export default function App() {
             exit={{ opacity: 0, y: -15 }}
             transition={{ duration: 0.3 }}
           >
-            {(profile.role === 'admin' || profile.email === 'begolbahaa98@gmail.com' || profile.number === '01555165366') && view === 'dashboard' ? (
+            {((profile.role === 'admin' || profile.permissions?.canManagePermissions || 
+             (import.meta.env.VITE_SUPER_ADMIN_EMAIL && profile.email === import.meta.env.VITE_SUPER_ADMIN_EMAIL) || 
+             (import.meta.env.VITE_SUPER_ADMIN_PHONE && profile.number === import.meta.env.VITE_SUPER_ADMIN_PHONE)) && view === 'dashboard') ? (
               <AdminDashboard currentProfile={profile} />
             ) : (
               <ScoutProfileView profile={profile} />

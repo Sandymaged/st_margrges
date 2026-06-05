@@ -91,18 +91,7 @@ export function initAdmin() {
   return {
     initialized: !!(admin && admin.apps && admin.apps.length > 0),
     envSet: !!findServiceAccountKey(),
-    envKey: foundKeyName || (findServiceAccountKey()?.key) || null,
-    error: initError,
-    // Provide a list of all available env keys (names only) to help debugging
-    availableKeys: Object.keys(process.env).filter(k => 
-      k.toUpperCase().includes('FIREBASE') || 
-      k.toUpperCase().includes('SERVICE_ACCOUNT') || 
-      k.toUpperCase().includes('GOOGLE') ||
-      k.toUpperCase().includes('JSON') ||
-      k.toUpperCase().includes('AUTH') ||
-      k.toUpperCase().includes('CREDENTIALS') ||
-      k.toUpperCase().includes('ACCOUNT')
-    )
+    error: initError
   };
 }
 

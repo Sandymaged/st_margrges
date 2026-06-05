@@ -48,9 +48,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const decodedToken = await admin.auth().verifyIdToken(adminToken);
     
     // Check if the requester is the super admin
-    const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || 
-                         decodedToken.email === '01555165366@scouts.local' || 
-                         decodedToken.phone_number === '+201555165366';
+    const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
+    const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
+    
+    const isSuperAdmin = 
+      (superAdminEmail && decodedToken.email === superAdminEmail) || 
+      (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
+      (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
 
     if (!isSuperAdmin) {
       // If not super admin, check if they are at least an admin in Firestore

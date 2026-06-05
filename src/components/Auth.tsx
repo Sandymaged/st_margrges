@@ -568,7 +568,7 @@ export default function Auth() {
               <button
                 type="button"
                 onClick={() => {
-                  const adminNumber = '01555165366';
+                  const adminNumber = import.meta.env.VITE_SUPER_ADMIN_PHONE || '01555165366';
                   const message = `أهلاً، أنا عضو في الكشافة ونسيت كلمة المرور الخاصة بي. رقم هاتفي هو: ${phone}`;
                   window.open(`https://wa.me/2${adminNumber}?text=${encodeURIComponent(message)}`, '_blank');
                 }}

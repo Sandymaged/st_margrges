@@ -199,10 +199,13 @@ enum OperationType {
     checkAdminStatus();
   }, [isOffline]);
 
+  const adminPhone = import.meta.env.VITE_SUPER_ADMIN_PHONE;
+  const adminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL;
+
   const isSuperAdmin = 
-    currentProfile?.number === '01555165366' || 
-    currentProfile?.email === 'begolbahaa98@gmail.com' ||
-    currentProfile?.email === '01555165366@scouts.local' ||
+    (adminPhone && currentProfile?.number === adminPhone) || 
+    (adminEmail && currentProfile?.email === adminEmail) ||
+    (adminPhone && currentProfile?.email === `${adminPhone}@scouts.local`) ||
     currentProfile?.permissions?.canManagePermissions;
 
   const handleGrantAllPermissions = () => {

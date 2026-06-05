@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import cors from "cors";
 
 // Use environment variables (Vercel will provide these in production)
 dotenv.config();
@@ -40,6 +41,13 @@ async function startServer() {
 
   // Apply rate limiter specifically to /api routes
   app.use("/api", apiLimiter);
+
+  // Apply CORS to admin API routes to only allow same-origin or specified domain
+  app.use("/api/admin", cors({
+    origin: process.env.ALLOWED_ADMIN_ORIGIN || true, 
+    methods: ['GET', 'POST'],
+    credentials: true
+  }));
 
   app.use(express.json());
 
@@ -79,7 +87,13 @@ async function startServer() {
       const decodedToken = await admin.auth().verifyIdToken(adminToken);
       
       // Check if the requester is the super admin
-      const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || decodedToken.email === '01555165366@scouts.local' || decodedToken.phone_number === '+201555165366';
+      const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
+      const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
+      
+      const isSuperAdmin = 
+        (superAdminEmail && decodedToken.email === superAdminEmail) || 
+        (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
+        (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
       
       let canDelete = isSuperAdmin;
       
@@ -171,7 +185,13 @@ async function startServer() {
       const decodedToken = await admin.auth().verifyIdToken(adminToken);
       
       // Check if the requester is the super admin
-      const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || decodedToken.email === '01555165366@scouts.local' || decodedToken.phone_number === '+201555165366';
+      const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
+      const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
+      
+      const isSuperAdmin = 
+        (superAdminEmail && decodedToken.email === superAdminEmail) || 
+        (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
+        (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
       
       if (!isSuperAdmin) {
         return res.status(403).json({ error: "Unauthorized. Only super admins can change phone numbers." });
@@ -208,7 +228,13 @@ async function startServer() {
       const decodedToken = await admin.auth().verifyIdToken(adminToken);
       
       // Check if the requester is the super admin
-      const isSuperAdmin = decodedToken.email === 'begolbahaa98@gmail.com' || decodedToken.email === '01555165366@scouts.local' || decodedToken.phone_number === '+201555165366';
+      const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
+      const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
+      
+      const isSuperAdmin = 
+        (superAdminEmail && decodedToken.email === superAdminEmail) || 
+        (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
+        (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
       
       if (!isSuperAdmin) {
         return res.status(403).json({ error: "Unauthorized. Only super admins can change passwords." });
