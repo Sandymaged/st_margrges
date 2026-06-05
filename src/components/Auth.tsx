@@ -131,7 +131,8 @@ export default function Auth() {
   }, []);
 
   // Helper to normalize Arabic text for comparison
-  const normalizeArabic = (str: string) => {
+  const normalizeArabic = (str: string | undefined | null) => {
+    if (!str) return '';
     return str.replace(/أ|إ|آ/g, 'ا')
               .replace(/ة/g, 'ه')
               .replace(/ى/g, 'ي')
@@ -139,19 +140,21 @@ export default function Auth() {
   };
 
   // Helper to get badges for a category and stage
-  const getAvailableBadges = (categoryId: string, scoutStage: Stage) => {
+  const getAvailableBadges = (categoryId: string, scoutStage: Stage | '') => {
     const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
     if (!category) return [];
     
-    // If there are stage-specific badges configured for ANY stage,
-    // then only return the badges explicitly configured for THIS stage.
-    if (category.stageBadges && Object.keys(category.stageBadges).length > 0) {
+    const badges = new Set<string>(category.badges || []);
+    
+    if (scoutStage && category.stageBadges) {
       const stageKey = Object.keys(category.stageBadges).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
-      return stageKey ? (category.stageBadges[stageKey as Stage] || []) : [];
+      if (stageKey) {
+        const specificBadges = (category.stageBadges[stageKey as Stage] || []) as string[];
+        specificBadges.forEach(b => badges.add(b));
+      }
     }
     
-    // Otherwise return all badges in category
-    return category.badges || [];
+    return Array.from(badges);
   };
 
   // Update badge selections when settings or stage/category change

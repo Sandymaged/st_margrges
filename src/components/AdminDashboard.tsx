@@ -249,7 +249,7 @@ enum OperationType {
   };
   
   // Helper to normalize Arabic strings for comparison
-  const normalizeArabic = (str: string) => {
+  const normalizeArabic = (str: string | undefined | null) => {
     if (!str) return '';
     return str
       .replace(/[أإآا]/g, 'ا')
