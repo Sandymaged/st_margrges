@@ -43,8 +43,12 @@ async function startServer() {
   app.use("/api", apiLimiter);
 
   // Apply CORS to admin API routes to only allow same-origin or specified domain
+  const allowedOrigins = process.env.ALLOWED_ADMIN_ORIGIN 
+    ? [process.env.ALLOWED_ADMIN_ORIGIN] 
+    : (process.env.APP_URL ? [process.env.APP_URL] : ['http://localhost:3000']);
+  
   app.use("/api/admin", cors({
-    origin: process.env.ALLOWED_ADMIN_ORIGIN || true, 
+    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
     methods: ['GET', 'POST'],
     credentials: true
   }));
