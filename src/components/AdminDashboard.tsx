@@ -2801,7 +2801,7 @@ enum OperationType {
                             className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
                             placeholder="أدخل الاسم"
                           />
-                          <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم بالعربي فقط</p>
+                          <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم ثلاثي بالعربي فقط</p>
                         </div>
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-gray-500 px-1">رقم الهاتف</label>
@@ -4065,7 +4065,7 @@ enum OperationType {
                         onChange={(e) => setEditForm(prev => prev ? { ...prev, name: e.target.value } : null)}
                         className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-bold"
                       />
-                      <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم بالعربي فقط</p>
+                      <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم ثلاثي بالعربي فقط</p>
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-black text-gray-500 mr-2">رقم الهاتف:</label>

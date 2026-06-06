@@ -393,7 +393,7 @@ export default function Auth() {
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
                     placeholder="أدخل اسمك"
                   />
-                  <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم بالعربي فقط</p>
+                  <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم ثلاثي بالعربي فقط</p>
                 </div>
 
                 <div className="space-y-2">

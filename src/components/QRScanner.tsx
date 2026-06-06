@@ -16,9 +16,16 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
   }, [onScanSuccess]);
 
   useEffect(() => {
+    // Try to ensure camera is requested safely
     const scanner = new Html5QrcodeScanner(
       "qr-reader",
-      { fps: 10, qrbox: { width: 250, height: 250 } },
+      { 
+        fps: 10, 
+        qrbox: { width: 250, height: 250 },
+        videoConstraints: {
+          facingMode: "environment"
+        }
+      },
       /* verbose= */ false
     );
     scannerRef.current = scanner;
@@ -70,6 +77,14 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
       </div>
       <div className="p-4">
         <div id="qr-reader" className="w-full"></div>
+        <div className="mt-4 text-center text-xs text-gray-500 font-bold bg-yellow-50 p-3 rounded-xl border border-yellow-100">
+          <p>إذا ظهر لك خطأ (NotAllowedError: Permission denied):</p>
+          <ul className="list-disc list-inside mt-1 text-[10px] text-right space-y-1">
+            <li>تأكد من إعطاء صلاحية الكاميرا للمتصفح من إعدادات الجهاز.</li>
+            <li>إذا كنت تستخدم متصفح داخل تطبيق (مثل ماسنجر أو تيليجرام)، يرجى فتح الرابط في متصفح خارجي (مثل Chrome أو Safari).</li>
+            <li>تأكد أنه لا يوجد تطبيق آخر يستخدم الكاميرا حالياً.</li>
+          </ul>
+        </div>
         {error && <p className="text-red-500 text-center mt-4 font-bold">{error}</p>}
       </div>
     </div>
