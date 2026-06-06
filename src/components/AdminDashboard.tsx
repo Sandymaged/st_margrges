@@ -648,7 +648,7 @@ enum OperationType {
     };
 
     if (detectCodeInjection(newAccountForm.password) || detectCodeInjection(newAccountForm.name)) {
-      setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.' });
+      setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أسماء تحتوي على أي رموز مثل * < #' });
       return;
     }
 
@@ -927,7 +927,7 @@ enum OperationType {
 
     if (editForm.name) {
       if (detectCodeInjection(editForm.name)) {
-        setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.' });
+        setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أسماء تحتوي على أي رموز مثل * < #' });
         return;
       }
 
@@ -1729,7 +1729,7 @@ enum OperationType {
     };
 
     if (detectCodeInjection(newPassword)) {
-      setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.' });
+      setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أسماء تحتوي على أي رموز مثل * < #' });
       return;
     }
 
@@ -2801,6 +2801,7 @@ enum OperationType {
                             className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
                             placeholder="أدخل الاسم"
                           />
+                          <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم بالعربي فقط</p>
                         </div>
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-gray-500 px-1">رقم الهاتف</label>
@@ -2812,6 +2813,7 @@ enum OperationType {
                             placeholder="01xxxxxxxxx"
                             maxLength={11}
                           />
+                          <p className="text-xs text-yellow-600 font-bold mt-1">برجاء التأكد من صحة الرقم المدخل قبل إنشاء الحساب</p>
                         </div>
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-gray-500 px-1">كلمة المرور</label>
@@ -4063,6 +4065,7 @@ enum OperationType {
                         onChange={(e) => setEditForm(prev => prev ? { ...prev, name: e.target.value } : null)}
                         className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-bold"
                       />
+                      <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم بالعربي فقط</p>
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-black text-gray-500 mr-2">رقم الهاتف:</label>
@@ -4073,6 +4076,7 @@ enum OperationType {
                         onChange={(e) => setEditForm(prev => prev ? { ...prev, number: e.target.value } : null)}
                         className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all text-sm font-bold"
                       />
+                      <p className="text-xs text-yellow-600 font-bold mt-1">برجاء التأكد من صحة الرقم المدخل قبل إنشاء الحساب</p>
                     </div>
                   </div>
                   <div className="space-y-2">

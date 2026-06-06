@@ -217,7 +217,7 @@ export default function Auth() {
       };
 
       if (detectCodeInjection(password) || (!isLogin && detectCodeInjection(name))) {
-        throw new Error('لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.');
+        throw new Error('لأسباب أمنية، غير مسموح باستخدام أسماء تحتوي على أي رموز مثل * < #');
       }
 
       if (!isLogin) {
@@ -393,6 +393,7 @@ export default function Auth() {
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
                     placeholder="أدخل اسمك"
                   />
+                  <p className="text-xs text-yellow-600 font-bold mt-1">برجاء ادخال الاسم بالعربي فقط</p>
                 </div>
 
                 <div className="space-y-2">
@@ -409,6 +410,7 @@ export default function Auth() {
                     maxLength={11}
                     disabled={isCompletingProfile}
                   />
+                  <p className="text-xs text-yellow-600 font-bold mt-1">برجاء التأكد من صحة الرقم المدخل قبل إنشاء الحساب</p>
                 </div>
 
                 {!isCompletingProfile && (
