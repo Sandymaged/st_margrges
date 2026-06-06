@@ -201,6 +201,31 @@ export default function Auth() {
     setLoading(true);
 
     try {
+      const detectCodeInjection = (text: string) => {
+        const patterns = [
+          /select\s+.*?\s+from/i,
+          /insert\s+into/i,
+          /drop\s+(table|database)/i,
+          /update\s+.*?\s+set/i,
+          /delete\s+from/i,
+          /union\s+select/i,
+          /<script.*?>/i,
+          /(javascript|vbscript):/i,
+          /1\s*=\s*1/i
+        ];
+        return patterns.some(p => p.test(text));
+      };
+
+      if (detectCodeInjection(password) || (!isLogin && detectCodeInjection(name))) {
+        throw new Error('لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.');
+      }
+
+      if (!isLogin && !isCompletingProfile) {
+        if (!/^[\u0600-\u06FFa-zA-Z0-9\s]+$/.test(name.trim())) {
+          throw new Error('الاسم يجب أن يحتوي على حروف عربية أو إنجليزية وأرقام ومسافات فقط، ولا يسمح بالرموز الخاصة.');
+        }
+      }
+
       if (!PHONE_REGEX.test(phone)) {
         throw new Error('رقم الهاتف يجب أن يكون 11 رقماً ويبدأ بـ 010 أو 011 أو 012 أو 015');
       }
