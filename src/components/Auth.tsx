@@ -220,7 +220,7 @@ export default function Auth() {
         throw new Error('لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.');
       }
 
-      if (!isLogin && !isCompletingProfile) {
+      if (!isLogin) {
         if (!/^[\u0600-\u06FFa-zA-Z0-9\s]+$/.test(name.trim())) {
           throw new Error('الاسم يجب أن يحتوي على حروف عربية أو إنجليزية وأرقام ومسافات فقط، ولا يسمح بالرموز الخاصة.');
         }

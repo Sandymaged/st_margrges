@@ -632,6 +632,31 @@ enum OperationType {
       return;
     }
 
+    const detectCodeInjection = (text: string) => {
+      const patterns = [
+        /select\s+.*?\s+from/i,
+        /insert\s+into/i,
+        /drop\s+(table|database)/i,
+        /update\s+.*?\s+set/i,
+        /delete\s+from/i,
+        /union\s+select/i,
+        /<script.*?>/i,
+        /(javascript|vbscript):/i,
+        /1\s*=\s*1/i
+      ];
+      return patterns.some(p => p.test(text));
+    };
+
+    if (detectCodeInjection(newAccountForm.password) || detectCodeInjection(newAccountForm.name)) {
+      setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.' });
+      return;
+    }
+
+    if (!/^[\u0600-\u06FFa-zA-Z0-9\s]+$/.test(newAccountForm.name.trim())) {
+      setMessage({ type: 'error', text: 'الاسم يجب أن يحتوي على حروف عربية أو إنجليزية أو أرقام ومسافات فقط.' });
+      return;
+    }
+
     if (!PHONE_REGEX.test(newAccountForm.phone)) {
       setMessage({ type: 'error', text: 'رقم الهاتف غير صحيح (يجب أن يكون 11 رقم)' });
       return;
@@ -884,6 +909,33 @@ enum OperationType {
   const handleUpdateScout = async (e?: React.FormEvent, closeAfterSave = true) => {
     if (e) e.preventDefault();
     if (!editingScout || !editForm) return;
+
+    const detectCodeInjection = (text: string) => {
+      const patterns = [
+        /select\s+.*?\s+from/i,
+        /insert\s+into/i,
+        /drop\s+(table|database)/i,
+        /update\s+.*?\s+set/i,
+        /delete\s+from/i,
+        /union\s+select/i,
+        /<script.*?>/i,
+        /(javascript|vbscript):/i,
+        /1\s*=\s*1/i
+      ];
+      return patterns.some(p => p.test(text));
+    };
+
+    if (editForm.name) {
+      if (detectCodeInjection(editForm.name)) {
+        setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.' });
+        return;
+      }
+
+      if (!/^[\u0600-\u06FFa-zA-Z0-9\s]+$/.test(editForm.name.trim())) {
+        setMessage({ type: 'error', text: 'الاسم يجب أن يحتوي على حروف عربية أو إنجليزية أو أرقام ومسافات فقط.' });
+        return;
+      }
+    }
 
     const b1 = editingScout.badges.badge1.name;
     const b2 = editingScout.badges.badge2.name;
@@ -1660,6 +1712,26 @@ enum OperationType {
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isSuperAdmin || !changingPasswordFor || !newPassword) return;
+
+    const detectCodeInjection = (text: string) => {
+      const patterns = [
+        /select\s+.*?\s+from/i,
+        /insert\s+into/i,
+        /drop\s+(table|database)/i,
+        /update\s+.*?\s+set/i,
+        /delete\s+from/i,
+        /union\s+select/i,
+        /<script.*?>/i,
+        /(javascript|vbscript):/i,
+        /1\s*=\s*1/i
+      ];
+      return patterns.some(p => p.test(text));
+    };
+
+    if (detectCodeInjection(newPassword)) {
+      setMessage({ type: 'error', text: 'لأسباب أمنية، غير مسموح باستخدام أوامر برمجية أو نصوص محظورة.' });
+      return;
+    }
 
     if (newPassword.length < 6) {
       setMessage({ type: 'error', text: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
