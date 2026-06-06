@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Scanner } from '@yudiel/react-qr-scanner';
 
 interface QRScannerProps {
   onScanSuccess: (decodedText: string) => void;
@@ -7,65 +7,46 @@ interface QRScannerProps {
 }
 
 export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const [error, setError] = useState<string>('');
-  const onScanSuccessRef = useRef(onScanSuccess);
+  const lastScanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
 
-  useEffect(() => {
-    onScanSuccessRef.current = onScanSuccess;
-  }, [onScanSuccess]);
-
-  useEffect(() => {
-    // Try to ensure camera is requested safely
-    const scanner = new Html5QrcodeScanner(
-      "qr-reader",
-      { 
-        fps: 10, 
-        qrbox: { width: 250, height: 250 },
-        videoConstraints: {
-          facingMode: "environment"
-        }
-      },
-      /* verbose= */ false
-    );
-    scannerRef.current = scanner;
-
-    let lastScannedText = '';
-    let lastScanTime = 0;
-
-    scanner.render(
-      (decodedText) => {
-        const now = Date.now();
-        // Prevent registering the exact same scan if it happened less than 1 second ago
-        if (decodedText === lastScannedText && now - lastScanTime < 1000) {
-          return;
-        }
-
-        lastScannedText = decodedText;
-        lastScanTime = now;
-
-        // Pause scanner after success to prevent immediate multiple fires
-        scanner.pause(true);
-        onScanSuccessRef.current(decodedText);
+  const handleScan = (data: any) => {
+    if (data && data.length > 0 && !isPaused) {
+      const text = data[0].rawValue;
+      if (text) {
+        setIsPaused(true);
+        onScanSuccess(text);
         
-        // Resume after 1 second
-        setTimeout(() => {
-          if (scannerRef.current) {
-            scannerRef.current.resume();
-          }
-        }, 1000);
-      },
-      (errorMessage) => {
-        // Ignore normal scanning errors (e.g. no QR code found)
+        // Prevent double scanning for 1.5 seconds
+        if (lastScanTimeoutRef.current) {
+          clearTimeout(lastScanTimeoutRef.current);
+        }
+        lastScanTimeoutRef.current = setTimeout(() => {
+          setIsPaused(false);
+        }, 1500);
       }
-    );
+    }
+  };
 
+  const handleError = (err: unknown) => {
+    console.error(err);
+    if (err instanceof Error) {
+      if (err.name === 'NotAllowedError' || err.message.includes('Permission denied')) {
+        setError('تعذر الوصول للكاميرا. يرجى إعطاء الصلاحيات اللازمة للمتصفح.');
+      } else {
+        setError('حدث خطأ أثناء تشغيل الكاميرا.');
+      }
+    }
+  };
+
+  useEffect(() => {
     return () => {
-      scanner.clear().catch(error => {
-        console.error("Failed to clear html5QrcodeScanner. ", error);
-      });
+      if (lastScanTimeoutRef.current) {
+        clearTimeout(lastScanTimeoutRef.current);
+      }
     };
-  }, []); // Empty dependency array to run only once
+  }, []);
 
   return (
     <div className="flex flex-col w-full">
@@ -76,16 +57,29 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         <h3 className="font-bold text-gray-800">مسح كود الحضور (QR)</h3>
       </div>
       <div className="p-4">
-        <div id="qr-reader" className="w-full"></div>
+        <div className="w-full max-w-sm mx-auto overflow-hidden rounded-xl">
+          <Scanner
+            onScan={handleScan}
+            onError={handleError}
+            paused={isPaused}
+            components={{
+              audio: false,
+              onOff: true,
+              torch: true,
+              zoom: true,
+              finder: true
+            }}
+          />
+        </div>
         <div className="mt-4 text-center text-xs text-gray-500 font-bold bg-yellow-50 p-3 rounded-xl border border-yellow-100">
-          <p>إذا ظهر لك خطأ (NotAllowedError: Permission denied):</p>
+          <p>إذا ظهر لك خطأ في الوصول للكاميرا:</p>
           <ul className="list-disc list-inside mt-1 text-[10px] text-right space-y-1">
             <li>تأكد من إعطاء صلاحية الكاميرا للمتصفح من إعدادات الجهاز.</li>
-            <li>إذا كنت تستخدم متصفح داخل تطبيق (مثل ماسنجر أو تيليجرام)، يرجى فتح الرابط في متصفح خارجي (مثل Chrome أو Safari).</li>
-            <li>تأكد أنه لا يوجد تطبيق آخر يستخدم الكاميرا حالياً.</li>
+            <li>تأكد من إغلاق أي تطبيق آخر يستخدم الكاميرا.</li>
+            <li>في حالة استخدام ماسنجر، افتح الرابط في متصفح خارجي (Chrome/Safari).</li>
           </ul>
         </div>
-        {error && <p className="text-red-500 text-center mt-4 font-bold">{error}</p>}
+        {error && <p className="text-red-500 text-center mt-4 font-bold bg-red-50 p-2 rounded-lg text-sm">{error}</p>}
       </div>
     </div>
   );
