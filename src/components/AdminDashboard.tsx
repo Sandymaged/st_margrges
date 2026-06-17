@@ -3268,7 +3268,7 @@ enum OperationType {
                       <input type="file" accept=".xlsx, .xls" onChange={importFromExcel} className="hidden" />
                     </label>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="hidden md:flex flex-wrap gap-2">
                     <button
                       onClick={() => setGradingStageFilter('all')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
@@ -3292,6 +3292,28 @@ enum OperationType {
                         {s}
                       </button>
                     ))}
+                  </div>
+                  <div className="flex md:hidden items-center gap-2 w-full">
+                    <button
+                      onClick={() => setGradingStageFilter('all')}
+                      className={`px-4 py-3 rounded-xl border text-sm font-bold transition-all whitespace-nowrap min-w-[70px] ${
+                        gradingStageFilter === 'all'
+                          ? 'bg-[#4285F4] text-white border-transparent'
+                          : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      الكل
+                    </button>
+                    <select
+                      value={gradingStageFilter === 'all' ? '' : gradingStageFilter}
+                      onChange={(e) => setGradingStageFilter(e.target.value as any || 'all')}
+                      className="flex-1 px-4 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 font-bold text-sm outline-none focus:ring-2 focus:ring-[#4285F4]"
+                    >
+                      <option value="" disabled hidden>المرحلة</option>
+                      {STAGES.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               )}
@@ -3355,7 +3377,7 @@ enum OperationType {
                   return (
                     <div key={stage} className="space-y-4">
                       <h3 className="text-xl font-bold text-[#4285F4]">{stage}</h3>
-                      <div className="overflow-x-auto border border-gray-200 rounded-2xl">
+                      <div className="hidden lg:block overflow-x-auto border border-gray-200 rounded-2xl">
                         <table className="w-full text-right border-collapse min-w-max">
                           <thead>
                             <tr className="bg-gray-50 border-b border-gray-200">
@@ -3536,6 +3558,154 @@ enum OperationType {
                           })}
                         </tbody>
                       </table>
+                    </div>
+
+                    {/* Mobile Accordion View */}
+                    <div className="flex flex-col gap-3 lg:hidden">
+                      {/* Final Score Row for Admins */}
+                      {(isSuperAdmin || canManageAllBadges || (canManageBadgeRequirements && canEditBadge(stage as Stage, gradingSelectedBadge))) && (
+                        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                          <div className="text-[#4285F4] font-black mb-3">الدرجة النهائية</div>
+                          {stageReqs.map((req, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-3 mb-2 last:mb-0">
+                              <span className="text-gray-700 text-sm font-bold truncate max-w-[200px]" title={req}>{req}</span>
+                              <input 
+                                type="number" 
+                                min="0"
+                                className="w-16 px-2 py-1.5 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold text-[#4285F4] text-sm transition-all"
+                                defaultValue={badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req] || 0}
+                                onBlur={(e) => handleSetRequirementMaxScore(gradingSelectedBadge, req, parseInt(e.target.value) || 0)}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {filteredScouts.length === 0 ? (
+                        <div className="p-8 text-center bg-white rounded-xl border border-gray-200 shadow-sm">
+                          <span className="text-gray-500 italic font-bold">
+                            {gradingSearchTerm 
+                              ? `لا يوجد كشافين يطابقون "${gradingSearchTerm}" في هذه المرحلة` 
+                              : "لا يوجد كشافين مسجلين لهذه الشارة في هذه المرحلة"}
+                          </span>
+                        </div>
+                      ) : filteredScouts.map(scout => {
+                          const badgeKey = scout.badges.badge1.name === gradingSelectedBadge ? 'badge1' 
+                                         : scout.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
+                                         : 'badge3';
+                          const badge = scout.badges[badgeKey];
+                          const completedReqs = badge.completedRequirements || [];
+                          const scores = badge.requirementScores || {};
+                          const progress = calculateBadgeProgress(gradingSelectedBadge, stageReqs, completedReqs, scores);
+
+                          return (
+                            <details key={scout.uid} className="group bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                              <summary className="p-4 flex items-center justify-between cursor-pointer list-none !outline-none hover:bg-gray-50 transition-colors">
+                                <div className="flex flex-col flex-1 pl-4 text-right">
+                                  <span className="font-bold text-gray-800 text-[15px] truncate max-w-[200px]" title={scout.name}>{scout.name}</span>
+                                  <span className="text-xs text-gray-500 mt-1 truncate">{scout.number}</span>
+                                </div>
+                                <div className="flex flex-row-reverse items-center gap-3">
+                                  <span className="text-[#4285F4] font-bold text-[15px] tracking-widest">{Math.round(progress)}%</span>
+                                  <ChevronDown size={18} className="text-gray-400 transition-transform group-open:rotate-180" />
+                                </div>
+                              </summary>
+                              
+                              <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex flex-col gap-4">
+                                {stageReqs.map((req, idx) => {
+                                  const maxScore = badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[req];
+                                  const isCompleted = completedReqs.includes(req);
+                                  const currentScore = scores[req];
+                                  const isSelf = scout.uid === currentProfile?.uid;
+                                  const canEdit = canEditBadge(scout.stage, gradingSelectedBadge, scout.uid, scout.role);
+
+                                  return (
+                                    <div key={idx} className="flex flex-row-reverse items-center justify-between gap-2 border-b border-gray-100 pb-4 last:border-0 last:pb-0">
+                                      <div className="flex flex-col text-right flex-1 pl-2">
+                                        <span className="text-sm font-bold text-gray-700 leading-tight">{req}</span>
+                                        {maxScore && maxScore > 0 && <span className="text-xs text-gray-500 mt-1">من {maxScore}</span>}
+                                      </div>
+                                      <div className="flex items-center flex-row-reverse gap-2">
+                                        {maxScore && maxScore > 0 && (
+                                          <div className="w-[70px]">
+                                            <ScoreInput
+                                              maxScore={maxScore}
+                                              currentScore={currentScore}
+                                              canEdit={canEdit}
+                                              onSave={(numVal) => {
+                                                const newScores = { ...scores };
+                                                if (numVal === undefined) {
+                                                  delete newScores[req];
+                                                } else {
+                                                  newScores[req] = numVal;
+                                                }
+                                                handleUpdateScoutBadge(scout, badgeKey, { requirementScores: newScores });
+                                              }}
+                                            />
+                                          </div>
+                                        )}
+                                        
+                                        {isSelf ? (
+                                          <span className="text-[10px] font-bold text-orange-400 bg-orange-400/10 px-2 py-1 rounded">لا تقيم نفسك</span>
+                                        ) : (
+                                          <>
+                                            {maxScore && maxScore > 0 ? (
+                                              <button
+                                                onClick={() => {
+                                                  if (!canEdit) return;
+                                                  setMessage({ type: 'success', text: 'تم حفظ التعديلات' });
+                                                }}
+                                                disabled={!canEdit}
+                                                className="text-xs font-bold border border-gray-300 text-gray-600 bg-white px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                              >
+                                                حفظ
+                                              </button>
+                                            ) : (
+                                              <button
+                                                onClick={() => {
+                                                  if (!canEdit) return;
+                                                  const newCompleted = isCompleted
+                                                    ? completedReqs.filter(r => r !== req)
+                                                    : [...completedReqs, req];
+                                                  handleUpdateScoutBadge(scout, badgeKey, {
+                                                    completedRequirements: newCompleted
+                                                  });
+                                                }}
+                                                disabled={!canEdit}
+                                                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                                                  isCompleted
+                                                    ? 'bg-transparent border border-gray-300 text-transparent'
+                                                    : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'
+                                                } ${!canEdit && 'opacity-50 cursor-not-allowed'} ${isCompleted && 'bg-[#34A853] !border-none text-white'}`}
+                                              >
+                                                <Check size={18} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
+                                              </button>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                                
+                                <div className="flex flex-row-reverse items-center justify-between pt-2">
+                                  <span className="text-sm font-bold text-gray-600">النتيجة</span>
+                                  <div>
+                                    {checkBadgePassStatus(gradingSelectedBadge, stageReqs, completedReqs, scores) ? (
+                                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#34A853]/10 text-[#34A853] border border-[#34A853]/20 text-xs font-bold">
+                                        <CheckCircle2 size={14} /> اجتاز
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EA4335]/10 text-[#EA4335] border border-[#EA4335]/20 text-xs font-bold">
+                                        <XCircle size={14} /> لم يجتز
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </details>
+                          );
+                      })}
                     </div>
                   </div>
                 );

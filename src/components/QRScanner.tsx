@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode';
-import { Upload, Camera } from 'lucide-react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 interface QRScannerProps {
   onScanSuccess: (decodedText: string) => void;
@@ -10,26 +9,7 @@ interface QRScannerProps {
 export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const [error, setError] = useState<string>('');
-  const [isProcessingFile, setIsProcessingFile] = useState(false);
   const onScanSuccessRef = useRef(onScanSuccess);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      setIsProcessingFile(true);
-      setError('');
-      try {
-        const html5QrCode = new Html5Qrcode("hidden-file-qr-reader");
-        const decodedText = await html5QrCode.scanFile(file, false);
-        html5QrCode.clear();
-        onScanSuccessRef.current(decodedText);
-      } catch (err) {
-        setError('لم يتم العثور على كود QR صحيح في الصورة. يرجى التأكد من وضوح الصورة وتجربة صورة أخرى.');
-      } finally {
-        setIsProcessingFile(false);
-      }
-    }
-  };
 
   useEffect(() => {
     onScanSuccessRef.current = onScanSuccess;
@@ -90,46 +70,16 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         <h3 className="font-bold text-gray-800">مسح كود الحضور (QR)</h3>
       </div>
       <div className="p-4 flex flex-col items-center">
-        {/* Hidden element required for scanFile to work */}
-        <div id="hidden-file-qr-reader" style={{ display: 'none' }}></div>
-        
-        <div className="w-full mb-6 relative">
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            id="native-camera-upload"
-            onChange={handleFileUpload}
-            disabled={isProcessingFile}
-          />
-          <label
-            htmlFor="native-camera-upload"
-            className={`w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-2xl cursor-pointer shadow-lg transition-all ${isProcessingFile ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            {isProcessingFile ? (
-              <span className="animate-pulse">جاري فحص الصورة...</span>
-            ) : (
-              <>
-                <Camera size={24} />
-                <span>التقاط صورة للكود (يعمل على جميع الهواتف)</span>
-              </>
-            )}
-          </label>
-        </div>
-
-        <div className="w-full flex items-center gap-4 mb-6">
-          <div className="flex-1 h-px bg-gray-200"></div>
-          <span className="text-sm font-bold text-gray-400">أو عن طريق الماسح المباشر</span>
-          <div className="flex-1 h-px bg-gray-200"></div>
-        </div>
-
         <div id="qr-reader" className="w-full max-w-sm mx-auto overflow-hidden rounded-xl border border-gray-200"></div>
         
-        {error && <p className="text-red-500 text-center mt-4 font-bold bg-red-50 w-full p-3 rounded-xl border border-red-100 text-sm">{error}</p>}
-        
+        {error && <p className="text-red-500 text-center mt-4 font-bold bg-red-50 p-2 rounded-lg text-sm">{error}</p>}
         <div className="mt-4 w-full text-center text-xs text-gray-500 font-bold bg-yellow-50 p-3 rounded-xl border border-yellow-100">
-          <p>إذا واجهت مشكلة في الماسح المباشر، يرجى استخدام الزر الأزرق بالأعلى لالتقاط الصورة مباشرة من كاميرا هاتفك.</p>
+          <p>إذا ظهر لك خطأ في الوصول للكاميرا:</p>
+          <ul className="list-disc list-inside mt-1 text-[10px] text-right space-y-1">
+            <li>تأكد من إعطاء صلاحية الكاميرا للمتصفح من إعدادات الجهاز.</li>
+            <li>تأكد من إغلاق أي تطبيق آخر يستخدم الكاميرا أو الكشاف.</li>
+            <li>في حالة استخدام ماسنجر أو فيسبوك، افتح الرابط في متصفح خارجي (Chrome/Safari).</li>
+          </ul>
         </div>
       </div>
     </div>
