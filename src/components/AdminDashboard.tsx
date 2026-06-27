@@ -2164,27 +2164,27 @@ enum OperationType {
                                 <div key={stage} className="flex flex-col sm:flex-row sm:items-center gap-3">
                                   <label className="text-sm font-bold text-gray-700 w-24 shrink-0">{stage}:</label>
                                   <input 
-                                    key={`${badge}-${stage}-${currentLink}`}
                                     type="url"
                                     placeholder="رابط المجموعة (مثال: https://chat.whatsapp.com/...)"
                                     className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-[#4285F4] outline-none text-left"
                                     dir="ltr"
                                     defaultValue={currentLink}
-                                    onBlur={async (e) => {
-                                      const newLink = e.target.value.trim();
-                                      if (newLink === currentLink) return;
+                                  />
+                                  <button
+                                    onClick={async (e) => {
+                                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                                      const newLink = input.value.trim();
                                       
                                       const newGroupLinks = {
                                         ...(badgeSettings.groupLinks || {}),
-                                        [matchedKey]: {
-                                          ...(badgeSettings.groupLinks?.[matchedKey] || {}),
+                                        [badge]: {
+                                          ...(badgeSettings.groupLinks?.[badge] || {}),
                                           [stage]: newLink
                                         }
                                       };
                                       
                                       try {
-                                        await setDoc(doc(db, 'settings', 'badges'), { 
-                                          ...badgeSettings, 
+                                        await updateDoc(doc(db, 'settings', 'badges'), { 
                                           groupLinks: newGroupLinks 
                                         });
                                         setMessage({ type: 'success', text: 'تم حفظ الرابط بنجاح' });
@@ -2192,7 +2192,10 @@ enum OperationType {
                                         handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
                                       }
                                     }}
-                                  />
+                                    className="px-4 py-2 bg-[#4285F4] text-white rounded-lg text-sm font-bold hover:bg-blue-600 transition-colors"
+                                  >
+                                    حفظ
+                                  </button>
                                 </div>
                               );
                             })}
