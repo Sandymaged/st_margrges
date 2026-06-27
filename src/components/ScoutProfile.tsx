@@ -168,6 +168,22 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
     }
   };
 
+  const normalizeString = (str: string) => {
+    return str.replace(/أ/g, 'ا').replace(/إ/g, 'ا').replace(/آ/g, 'ا').replace(/ة/g, 'ه').replace(/ي/g, 'ى');
+  };
+
+  const getGroupLink = (badgeName: string, stage: string) => {
+    if (badgeSettings.groupLinks?.[badgeName]?.[stage]) {
+      return badgeSettings.groupLinks[badgeName][stage];
+    }
+    const normalizedBadge = normalizeString(badgeName.trim());
+    const matchedKey = Object.keys(badgeSettings.groupLinks || {}).find(k => normalizeString(k.trim()) === normalizedBadge);
+    if (matchedKey && badgeSettings.groupLinks?.[matchedKey]?.[stage]) {
+      return badgeSettings.groupLinks[matchedKey][stage];
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-8">
       {/* Welcome Groups Modal */}
@@ -188,7 +204,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 <div className="space-y-4">
                   {[profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].map((b, i) => {
                     if (!b || !b.name) return null;
-                    const link = badgeSettings.groupLinks?.[b.name]?.[profile.stage];
+                    const link = getGroupLink(b.name, profile.stage);
                     if (!link) return null;
                     
                     return (
@@ -209,7 +225,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                   })}
                   
                   {/* If no links are available for any of their badges */}
-                  {![profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].some((b) => b && b.name && badgeSettings.groupLinks?.[b.name]?.[profile.stage]) && (
+                  {![profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].some((b) => b && b.name && getGroupLink(b.name, profile.stage)) && (
                     <div className="text-center text-gray-500 font-bold p-4 bg-gray-50 rounded-2xl border border-gray-100">
                       لا توجد مجموعات متاحة لشاراتك حالياً.
                     </div>
@@ -414,7 +430,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].map((b, i) => {
               if (!b || !b.name) return null;
-              const link = badgeSettings.groupLinks?.[b.name]?.[profile.stage];
+              const link = getGroupLink(b.name, profile.stage);
               
               return (
                 <div key={i} className="bg-gray-50 p-6 rounded-2xl border border-gray-100 flex flex-col gap-4 hover:shadow-md transition-shadow">

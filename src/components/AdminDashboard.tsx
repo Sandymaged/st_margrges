@@ -77,7 +77,8 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     categories: DEFAULT_CATEGORIES,
     requirements: {},
     requirementMaxScores: {},
-    requirementCategories: {}
+    requirementCategories: {},
+    groupLinks: {}
   });
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
     logoUrl: '/syncc.png',
@@ -365,7 +366,8 @@ enum OperationType {
           categories: data.categories || DEFAULT_CATEGORIES,
           requirements: data.requirements || {},
           requirementMaxScores: data.requirementMaxScores || {},
-          requirementCategories: data.requirementCategories || {}
+          requirementCategories: data.requirementCategories || {},
+          groupLinks: data.groupLinks || {}
         });
       } else {
         setBadgeSettings({
@@ -2156,14 +2158,17 @@ enum OperationType {
                               }
 
                               const currentLink = badgeSettings.groupLinks?.[badge]?.[stage] || '';
+                              console.log('Badge:', badge, 'Link:', currentLink, 'GroupLinks:', badgeSettings.groupLinks);
 
                               return (
                                 <div key={stage} className="flex flex-col sm:flex-row sm:items-center gap-3">
                                   <label className="text-sm font-bold text-gray-700 w-24 shrink-0">{stage}:</label>
                                   <input 
+                                    key={`${badge}-${stage}-${currentLink}`}
                                     type="url"
                                     placeholder="رابط المجموعة (مثال: https://chat.whatsapp.com/...)"
-                                    className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-[#4285F4] outline-none"
+                                    className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-[#4285F4] outline-none text-left"
+                                    dir="ltr"
                                     defaultValue={currentLink}
                                     onBlur={async (e) => {
                                       const newLink = e.target.value.trim();
@@ -2171,8 +2176,8 @@ enum OperationType {
                                       
                                       const newGroupLinks = {
                                         ...(badgeSettings.groupLinks || {}),
-                                        [badge]: {
-                                          ...(badgeSettings.groupLinks?.[badge] || {}),
+                                        [matchedKey]: {
+                                          ...(badgeSettings.groupLinks?.[matchedKey] || {}),
                                           [stage]: newLink
                                         }
                                       };
