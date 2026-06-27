@@ -33,7 +33,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
           categories: data.categories || [],
           requirements: data.requirements || {},
           requirementMaxScores: data.requirementMaxScores || {},
-          requirementCategories: data.requirementCategories || {}
+          requirementCategories: data.requirementCategories || {},
+          groupLinks: data.groupLinks || {}
         });
       }
     });
