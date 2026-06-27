@@ -841,29 +841,31 @@ enum OperationType {
     if (!category) return [];
     
     if (scoutStage) {
-      const badges = new Set<string>(category.badges || []);
+      const uniqueMap = new Map<string, string>();
+      (category.badges || []).forEach(b => uniqueMap.set(normalizeArabic(b.trim()), b));
       
       if (category.stageBadges) {
         const stageKey = Object.keys(category.stageBadges).find(k => normalizeArabic(k) === normalizeArabic(scoutStage));
         if (stageKey) {
           const specificBadges = (category.stageBadges[stageKey as Stage] || []) as string[];
-          specificBadges.forEach(b => badges.add(b));
+          specificBadges.forEach(b => uniqueMap.set(normalizeArabic(b.trim()), b));
         }
       }
       
-      return Array.from(badges);
+      return Array.from(uniqueMap.values());
     }
 
     // If no stage provided, return all badges in this category across all stages
-    const allBadges = new Set<string>(category.badges || []);
+    const uniqueMap = new Map<string, string>();
+    (category.badges || []).forEach(b => uniqueMap.set(normalizeArabic(b.trim()), b));
     if (category.stageBadges) {
       Object.values(category.stageBadges).forEach(badges => {
         if (Array.isArray(badges)) {
-          (badges as string[]).forEach(b => allBadges.add(b));
+          (badges as string[]).forEach(b => uniqueMap.set(normalizeArabic(b.trim()), b));
         }
       });
     }
-    return Array.from(allBadges);
+    return Array.from(uniqueMap.values());
   };
 
   const filteredAndSortedScouts = useMemo(() => {
@@ -2136,15 +2138,18 @@ enum OperationType {
                     <h3 className="text-xl font-bold text-gray-800 mb-4">{category.name}</h3>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                       {getAvailableBadges(category.id).map(badge => (
-                        <div key={badge} className="bg-white p-4 rounded-xl border border-gray-200">
-                          <h4 className="font-bold text-[#4285F4] mb-4 border-b border-gray-50 pb-2">{badge}</h4>
-                          <div className="space-y-3">
+                        <details key={badge} className="bg-white rounded-xl border border-gray-200 group overflow-hidden">
+                          <summary className="font-bold text-[#4285F4] p-4 cursor-pointer flex items-center justify-between hover:bg-blue-50 transition-colors list-none [&::-webkit-details-marker]:hidden">
+                            <span>{badge}</span>
+                            <ChevronDown size={20} className="transition-transform group-open:rotate-180" />
+                          </summary>
+                          <div className="p-4 pt-0 space-y-3 border-t border-gray-50 mt-2">
                             {STAGES.map(stage => {
                               // If it's a general badge, it's available for all stages
-                              const isGeneralBadge = category.badges?.includes(badge);
+                              const isGeneralBadge = category.badges?.some(b => normalizeArabic(b.trim()) === normalizeArabic(badge.trim()));
                               
                               // If it's a stage-specific badge, check if it's allowed for this stage
-                              const isStageBadge = category.stageBadges?.[stage]?.includes(badge);
+                              const isStageBadge = category.stageBadges?.[stage]?.some(b => normalizeArabic(b.trim()) === normalizeArabic(badge.trim()));
                               
                               if (!isGeneralBadge && !isStageBadge) {
                                 return null;
@@ -2187,7 +2192,7 @@ enum OperationType {
                               );
                             })}
                           </div>
-                        </div>
+                        </details>
                       ))}
                     </div>
                   </div>
