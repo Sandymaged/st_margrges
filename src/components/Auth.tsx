@@ -268,6 +268,7 @@ export default function Auth() {
           },
           role: 'scout',
           isVerified: true, // Set to true by default
+          showWelcomeGroups: true, // Show group links on first login
           createdAt: serverTimestamp(),
           joinDate: serverTimestamp(),
         };

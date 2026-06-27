@@ -45,6 +45,7 @@ export interface ScoutProfile {
   };
   role: 'scout' | 'admin';
   isVerified: boolean;
+  showWelcomeGroups?: boolean;
   permissions?: AdminPermissions;
   createdAt: any;
   joinDate: any;
@@ -75,6 +76,7 @@ export interface BadgeSettings {
   requirements: Record<string, Partial<Record<Stage | 'all', string[]>>>;
   requirementMaxScores?: Record<string, Record<string, number>>;
   requirementCategories?: Record<string, Record<string, string>>;
+  groupLinks?: Record<string, Partial<Record<Stage, string>>>;
 }
 
 export interface GeneralSettings {

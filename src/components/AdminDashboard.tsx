@@ -59,6 +59,13 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [gradingSelectedBadge, setGradingSelectedBadge] = useState<string>('');
   const [gradingSearchTerm, setGradingSearchTerm] = useState<string>('');
   const [gradingStageFilter, setGradingStageFilter] = useState<Stage | 'all'>('all');
+  
+  // Quick Score Assignment States
+  const [quickScoreCategory, setQuickScoreCategory] = useState<string>('all');
+  const [quickScoreReq, setQuickScoreReq] = useState<string>('');
+  const [quickScoreValue, setQuickScoreValue] = useState<string>('');
+  const [quickScoreGlobalValue, setQuickScoreGlobalValue] = useState<string>('');
+  
   const [activeBadgeTab, setActiveBadgeTab] = useState<'badge1' | 'badge2' | 'badge3'>('badge1');
   const [scouts, setScouts] = useState<ScoutProfile[]>([]);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
@@ -82,7 +89,8 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [selectedBadgeForReq, setSelectedBadgeForReq] = useState<string>('');
   const [newRequirementInput, setNewRequirementInput] = useState('');
   const [newRequirementCategory, setNewRequirementCategory] = useState('');
-  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance'>('categories');
+  const [newRequirementScore, setNewRequirementScore] = useState('');
+  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance' | 'groupLinks'>('categories');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerDate, setScannerDate] = useState<string | null>(null);
   const [scanLogs, setScanLogs] = useState<{uid: string, name: string, time: string, action: string}[]>([]);
@@ -127,6 +135,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     newText: string;
     category: string;
     stage: Stage | 'all';
+    maxScore: string;
   } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -1254,7 +1263,7 @@ enum OperationType {
     }
   };
 
-  const handleAddRequirement = async (badgeName: string, req: string, stages: Stage[] | 'all' = 'all', category: string = 'عام') => {
+  const handleAddRequirement = async (badgeName: string, req: string, stages: Stage[] | 'all' = 'all', category: string = 'عام', score: string = '') => {
     if (!badgeName || !req.trim()) return;
     
     const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
@@ -1287,14 +1296,26 @@ enum OperationType {
       }
     };
     
+    const updatedMaxScores = {
+      ...(badgeSettings.requirementMaxScores || {})
+    };
+    if (score && !isNaN(parseInt(score))) {
+      updatedMaxScores[badgeName] = {
+        ...(updatedMaxScores[badgeName] || {}),
+        [req.trim()]: parseInt(score)
+      };
+    }
+    
     try {
       await setDoc(doc(db, 'settings', 'badges'), { 
         ...badgeSettings, 
         requirements: updatedRequirements,
-        requirementCategories: updatedCategories
+        requirementCategories: updatedCategories,
+        ...(score && !isNaN(parseInt(score)) ? { requirementMaxScores: updatedMaxScores } : {})
       });
       setNewRequirementInput('');
       setNewRequirementCategory('');
+      setNewRequirementScore('');
       setMessage({ type: 'success', text: 'تم إضافة البند بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -1335,26 +1356,38 @@ enum OperationType {
     // Remove old category if text changed
     if (oldText !== newText.trim()) {
       delete updatedCategories[badgeName][oldText];
-      
-      // Also update max scores if text changed
-      if (badgeSettings.requirementMaxScores?.[badgeName]?.[oldText]) {
-        const updatedMaxScores = {
-          ...(badgeSettings.requirementMaxScores || {}),
-          [badgeName]: {
-            ...(badgeSettings.requirementMaxScores?.[badgeName] || {}),
-            [newText.trim()]: badgeSettings.requirementMaxScores[badgeName][oldText]
-          }
-        };
-        delete updatedMaxScores[badgeName][oldText];
-        badgeSettings.requirementMaxScores = updatedMaxScores;
-      }
+    }
+    
+    // Always update max scores if provided or if text changed
+    const updatedMaxScores = {
+      ...(badgeSettings.requirementMaxScores || {})
+    };
+    
+    // Initialize badge object if needed
+    if (!updatedMaxScores[badgeName]) {
+      updatedMaxScores[badgeName] = {};
+    }
+
+    if (oldText !== newText.trim() && updatedMaxScores[badgeName][oldText] !== undefined) {
+       // move old score to new text if it exists and text changed
+       updatedMaxScores[badgeName][newText.trim()] = updatedMaxScores[badgeName][oldText];
+       delete updatedMaxScores[badgeName][oldText];
+    }
+
+    // Now set the new score if provided
+    if (editingRequirement.maxScore && !isNaN(parseInt(editingRequirement.maxScore))) {
+      updatedMaxScores[badgeName] = {
+        ...updatedMaxScores[badgeName],
+        [newText.trim()]: parseInt(editingRequirement.maxScore)
+      };
     }
 
     try {
       await setDoc(doc(db, 'settings', 'badges'), { 
         ...badgeSettings, 
         requirements: updatedRequirements,
-        requirementCategories: updatedCategories
+        requirementCategories: updatedCategories,
+        requirementMaxScores: updatedMaxScores
       });
       setEditingRequirement(null);
       setMessage({ type: 'success', text: 'تم تعديل البند بنجاح' });
@@ -1771,7 +1804,12 @@ enum OperationType {
   };
 
   const availableTabs = [];
-  if (canManageAllBadges) availableTabs.push('categories');
+  if (canManageAllBadges) {
+    availableTabs.push('categories');
+  }
+  if (isSuperAdmin) {
+    availableTabs.push('groupLinks');
+  }
   if (canManageAllBadges || canManageBadgeRequirements) availableTabs.push('requirements');
   if (isSuperAdmin) availableTabs.push('general', 'activity_logs', 'deleted_accounts_logs');
   if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
@@ -1861,6 +1899,14 @@ enum OperationType {
                 className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'categories' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
                 تصنيف الشارات
+              </button>
+            )}
+            {isSuperAdmin && (
+              <button
+                onClick={() => setSettingsTab('groupLinks')}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'groupLinks' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                روابط المجموعات
               </button>
             )}
             {(canManageAllBadges || canManageBadgeRequirements) && (
@@ -2077,6 +2123,77 @@ enum OperationType {
                 ))}
               </div>
             </div>
+          ) : activeSettingsTab === 'groupLinks' ? (
+            <div className="space-y-8">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 mb-2">روابط المجموعات (WhatsApp)</h2>
+                <p className="text-gray-500">قم بإضافة روابط مجموعات الواتساب الخاصة بكل شارة ومرحلة. ستظهر هذه الروابط للكشاف بعد التسجيل مباشرة.</p>
+              </div>
+
+              <div className="space-y-6">
+                {badgeSettings.categories.map(category => (
+                  <div key={category.id} className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">{category.name}</h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {getAvailableBadges(category.id).map(badge => (
+                        <div key={badge} className="bg-white p-4 rounded-xl border border-gray-200">
+                          <h4 className="font-bold text-[#4285F4] mb-4 border-b border-gray-50 pb-2">{badge}</h4>
+                          <div className="space-y-3">
+                            {STAGES.map(stage => {
+                              // If it's a general badge, it's available for all stages
+                              const isGeneralBadge = category.badges?.includes(badge);
+                              
+                              // If it's a stage-specific badge, check if it's allowed for this stage
+                              const isStageBadge = category.stageBadges?.[stage]?.includes(badge);
+                              
+                              if (!isGeneralBadge && !isStageBadge) {
+                                return null;
+                              }
+
+                              const currentLink = badgeSettings.groupLinks?.[badge]?.[stage] || '';
+
+                              return (
+                                <div key={stage} className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                  <label className="text-sm font-bold text-gray-700 w-24 shrink-0">{stage}:</label>
+                                  <input 
+                                    type="url"
+                                    placeholder="رابط المجموعة (مثال: https://chat.whatsapp.com/...)"
+                                    className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-[#4285F4] outline-none"
+                                    defaultValue={currentLink}
+                                    onBlur={async (e) => {
+                                      const newLink = e.target.value.trim();
+                                      if (newLink === currentLink) return;
+                                      
+                                      const newGroupLinks = {
+                                        ...(badgeSettings.groupLinks || {}),
+                                        [badge]: {
+                                          ...(badgeSettings.groupLinks?.[badge] || {}),
+                                          [stage]: newLink
+                                        }
+                                      };
+                                      
+                                      try {
+                                        await setDoc(doc(db, 'settings', 'badges'), { 
+                                          ...badgeSettings, 
+                                          groupLinks: newGroupLinks 
+                                        });
+                                        setMessage({ type: 'success', text: 'تم حفظ الرابط بنجاح' });
+                                      } catch (error) {
+                                        handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : activeSettingsTab === 'requirements' ? (
             <div className="space-y-6">
               <div>
@@ -2213,7 +2330,8 @@ enum OperationType {
                                                     oldText: req,
                                                     newText: req,
                                                     category: category,
-                                                    stage: 'all'
+                                                    stage: 'all',
+                                                    maxScore: (badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || '').toString()
                                                   })}
                                                   className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                                   title="تعديل البند"
@@ -2271,7 +2389,8 @@ enum OperationType {
                                                     oldText: req,
                                                     newText: req,
                                                     category: category,
-                                                    stage: stage
+                                                    stage: stage,
+                                                    maxScore: (badgeSettings.requirementMaxScores?.[selectedBadgeForReq]?.[req] || '').toString()
                                                   })}
                                                   className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                                   title="تعديل البند"
@@ -2353,6 +2472,14 @@ enum OperationType {
                                   className="w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
                                 />
                                 <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="الدرجة النهائية..."
+                                  value={newRequirementScore}
+                                  onChange={(e) => setNewRequirementScore(e.target.value)}
+                                  className="w-full sm:w-32 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold text-center"
+                                />
+                                <input
                                   type="text"
                                   placeholder="أضف بنداً جديداً..."
                                   value={newRequirementInput}
@@ -2362,7 +2489,7 @@ enum OperationType {
                                         const finalStages = selectedStageForNewReq === 'all' 
                                           ? (canEditAllStagesForBadge ? 'all' : allowedStagesForSelectedBadge)
                                           : selectedStageForNewReq;
-                                        handleAddRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory);
+                                        handleAddRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory, newRequirementScore);
                                       }
                                   }}
                                   className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
@@ -2372,7 +2499,7 @@ enum OperationType {
                                       const finalStages = selectedStageForNewReq === 'all' 
                                         ? (canEditAllStagesForBadge ? 'all' : allowedStagesForSelectedBadge)
                                         : selectedStageForNewReq;
-                                      handleAddRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory);
+                                      handleAddRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory, newRequirementScore);
                                   }}
                                   disabled={!newRequirementInput.trim()}
                                   className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
@@ -3319,6 +3446,142 @@ enum OperationType {
               )}
             </div>
           </div>
+          
+          {gradingSelectedBadge && (isSuperAdmin || canManageAllBadges) && (
+            <div className="bg-white p-4 lg:p-6 rounded-2xl border border-gray-200 shadow-sm mb-8">
+              <div className="flex items-center gap-2 mb-6 text-[#4285F4]">
+                <Settings size={20} />
+                <h3 className="font-bold text-lg">أدوات الدرجات السريعة (إدارة الشارات)</h3>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* 1. Set Global Max Score for all Requirements in Badge */}
+                <div className="space-y-4 border-b md:border-b-0 md:border-l border-gray-100 pb-6 md:pb-0 md:pl-8">
+                  <h4 className="font-bold text-gray-700 text-sm">تعيين درجة موحدة لجميع بنود الشارة</h4>
+                  <p className="text-xs text-gray-500">سيتم تطبيق هذه الدرجة على جميع البنود في جميع المراحل لهذه الشارة.</p>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="number"
+                      min="0"
+                      placeholder="الدرجة"
+                      className="w-24 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold"
+                      value={quickScoreGlobalValue}
+                      onChange={e => setQuickScoreGlobalValue(e.target.value)}
+                    />
+                    <button
+                      disabled={!quickScoreGlobalValue}
+                      onClick={() => {
+                        const score = parseInt(quickScoreGlobalValue);
+                        if(isNaN(score)) return;
+                        
+                        const allReqsForBadge = new Set<string>();
+                        STAGES.forEach(stage => {
+                          getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage).forEach(r => allReqsForBadge.add(r));
+                        });
+                        
+                        const updatedMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+                        const badgeScores = { ...(updatedMaxScores[gradingSelectedBadge] || {}) };
+                        
+                        allReqsForBadge.forEach(req => {
+                          badgeScores[req] = score;
+                        });
+                        
+                        updatedMaxScores[gradingSelectedBadge] = badgeScores;
+                        
+                        setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirementMaxScores: updatedMaxScores })
+                          .then(() => {
+                             setMessage({ type: 'success', text: 'تم توحيد الدرجات بنجاح' });
+                             setQuickScoreGlobalValue('');
+                          })
+                          .catch(() => setMessage({ type: 'error', text: 'حدث خطأ أثناء توحيد الدرجات' }));
+                      }}
+                      className="flex-1 px-4 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-blue-600 transition-colors font-bold text-sm disabled:opacity-50"
+                    >
+                      تطبيق على الكل
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Set Score for Specific Requirement by Category */}
+                <div className="space-y-4 pr-0 md:pr-4">
+                  <h4 className="font-bold text-gray-700 text-sm">تعديل درجة بند محدد</h4>
+                  
+                  {(() => {
+                    const allReqsForBadge = new Set<string>();
+                    STAGES.forEach(stage => {
+                      getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage).forEach(r => allReqsForBadge.add(r));
+                    });
+                    
+                    const reqCats = badgeSettings.requirementCategories?.[gradingSelectedBadge] || {};
+                    const categoriesAvailable = Array.from(new Set(Array.from(allReqsForBadge).map(req => reqCats[req] || 'عام')));
+                    
+                    const filteredReqs = Array.from(allReqsForBadge).filter(req => {
+                      const reqCat = reqCats[req] || 'عام';
+                      return quickScoreCategory === 'all' || reqCat === quickScoreCategory;
+                    });
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <select
+                            value={quickScoreCategory}
+                            onChange={(e) => {
+                              setQuickScoreCategory(e.target.value);
+                              setQuickScoreReq('');
+                              setQuickScoreValue('');
+                            }}
+                            className="flex-1 sm:w-1/3 px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-bold outline-none focus:ring-2 focus:ring-[#4285F4]"
+                          >
+                            <option value="all">كل التصنيفات</option>
+                            {categoriesAvailable.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          
+                          <select
+                            value={quickScoreReq}
+                            onChange={(e) => {
+                              setQuickScoreReq(e.target.value);
+                              setQuickScoreValue((badgeSettings.requirementMaxScores?.[gradingSelectedBadge]?.[e.target.value] || 0).toString());
+                            }}
+                            className="flex-[2] px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-bold outline-none focus:ring-2 focus:ring-[#4285F4]"
+                          >
+                            <option value="" disabled>اختر البند...</option>
+                            {filteredReqs.map(r => (
+                              <option key={r} value={r}>{r.length > 50 ? r.substring(0, 50) + '...' : r}</option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="number"
+                            min="0"
+                            placeholder="الدرجة"
+                            className="w-24 px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold"
+                            value={quickScoreValue}
+                            onChange={e => setQuickScoreValue(e.target.value)}
+                            disabled={!quickScoreReq}
+                          />
+                          <button
+                            disabled={!quickScoreReq || !quickScoreValue}
+                            onClick={() => {
+                              const score = parseInt(quickScoreValue);
+                              if(isNaN(score)) return;
+                              handleSetRequirementMaxScore(gradingSelectedBadge, quickScoreReq, score).then(() => {
+                                setMessage({ type: 'success', text: 'تم حفظ الدرجة بنجاح' });
+                              });
+                            }}
+                            className="flex-1 px-4 py-2.5 bg-[#34A853] text-white rounded-xl hover:bg-green-600 transition-colors font-bold text-sm disabled:opacity-50"
+                          >
+                            حفظ الدرجة
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
           
           {gradingSelectedBadge ? (
             <div className="space-y-8">
@@ -4750,6 +5013,18 @@ enum OperationType {
                     onChange={(e) => setEditingRequirement(prev => prev ? { ...prev, category: e.target.value } : null)}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700"
                     placeholder="مثال: روحي، عملي..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-700">الدرجة النهائية:</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editingRequirement.maxScore || ''}
+                    onChange={(e) => setEditingRequirement(prev => prev ? { ...prev, maxScore: e.target.value } : null)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none font-bold text-gray-700"
+                    placeholder="مثال: 10..."
                   />
                 </div>
 
