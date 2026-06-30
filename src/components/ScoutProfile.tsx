@@ -214,6 +214,48 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
     return null;
   };
 
+  const checkBadgePassStatus = (badgeName: string, stage: string, completedReqs: string[], requirementScores: Record<string, number> = {}) => {
+    const reqs = getScoutBadgeRequirements(badgeName, stage);
+    if (reqs.length === 0) return false;
+
+    // 1. All items must be submitted
+    const allSubmitted = reqs.every(req => completedReqs.includes(req));
+    if (!allSubmitted) return false;
+
+    // Group requirements by category
+    const reqsByCategory: Record<string, string[]> = {};
+    reqs.forEach(req => {
+      const cat = badgeSettings.requirementCategories?.[badgeName]?.[req] || 'عام';
+      if (!reqsByCategory[cat]) reqsByCategory[cat] = [];
+      reqsByCategory[cat].push(req);
+    });
+
+    // 2 & 3. Check each category
+    for (const cat in reqsByCategory) {
+      const catReqs = reqsByCategory[cat];
+      let catTotalScore = 0;
+      let catMaxScore = 0;
+
+      catReqs.forEach(req => {
+        const maxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[req] || 0;
+        if (maxScore > 0) {
+          catMaxScore += maxScore;
+          const score = requirementScores[req] || 0;
+          if (score >= maxScore * 0.5) {
+            catTotalScore += score;
+          }
+        } else {
+          catMaxScore += 1;
+          catTotalScore += completedReqs.includes(req) ? 1 : 0;
+        }
+      });
+
+      if (catTotalScore < catMaxScore * 0.5) return false;
+    }
+
+    return true;
+  };
+
   return (
     <div className="space-y-8">
       {/* Welcome Groups Modal */}
@@ -365,6 +407,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               hasCancellationRequest={!!cancellationRequests['badge1']}
               onCancelRequest={() => handleCancelBadgeRequest('badge1', profile.badges.badge1.name)}
               showResults={generalSettings.showResults}
+              isPassed={checkBadgePassStatus(profile.badges.badge1.name, profile.stage, profile.badges.badge1.completedRequirements || [], profile.badges.badge1.requirementScores || {})}
             />
           )}
           {profile.badges.badge2?.name && (
@@ -377,6 +420,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               hasCancellationRequest={!!cancellationRequests['badge2']}
               onCancelRequest={() => handleCancelBadgeRequest('badge2', profile.badges.badge2.name)}
               showResults={generalSettings.showResults}
+              isPassed={checkBadgePassStatus(profile.badges.badge2.name, profile.stage, profile.badges.badge2.completedRequirements || [], profile.badges.badge2.requirementScores || {})}
             />
           )}
           {profile.badges.badge3?.name && (
@@ -389,6 +433,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               hasCancellationRequest={!!cancellationRequests['badge3']}
               onCancelRequest={() => handleCancelBadgeRequest('badge3', profile.badges.badge3.name)}
               showResults={generalSettings.showResults}
+              isPassed={checkBadgePassStatus(profile.badges.badge3.name, profile.stage, profile.badges.badge3.completedRequirements || [], profile.badges.badge3.requirementScores || {})}
             />
           )}
           {[profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].filter(b => b && b.name).length < 3 && (
@@ -458,6 +503,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.pastWaves.wave1.badges.badge1.name] || {}}
                 requirementCategories={badgeSettings.requirementCategories?.[profile.pastWaves.wave1.badges.badge1.name] || {}}
                 showResults={true}
+                isPastWave={true}
+                isPassed={checkBadgePassStatus(profile.pastWaves.wave1.badges.badge1.name, profile.stage, profile.pastWaves.wave1.badges.badge1.completedRequirements || [], profile.pastWaves.wave1.badges.badge1.requirementScores || {})}
               />
             )}
             {profile.pastWaves.wave1.badges.badge2?.name && (
@@ -468,6 +515,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.pastWaves.wave1.badges.badge2.name] || {}}
                 requirementCategories={badgeSettings.requirementCategories?.[profile.pastWaves.wave1.badges.badge2.name] || {}}
                 showResults={true}
+                isPastWave={true}
+                isPassed={checkBadgePassStatus(profile.pastWaves.wave1.badges.badge2.name, profile.stage, profile.pastWaves.wave1.badges.badge2.completedRequirements || [], profile.pastWaves.wave1.badges.badge2.requirementScores || {})}
               />
             )}
             {profile.pastWaves.wave1.badges.badge3?.name && (
@@ -478,6 +527,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.pastWaves.wave1.badges.badge3.name] || {}}
                 requirementCategories={badgeSettings.requirementCategories?.[profile.pastWaves.wave1.badges.badge3.name] || {}}
                 showResults={true}
+                isPastWave={true}
+                isPassed={checkBadgePassStatus(profile.pastWaves.wave1.badges.badge3.name, profile.stage, profile.pastWaves.wave1.badges.badge3.completedRequirements || [], profile.pastWaves.wave1.badges.badge3.requirementScores || {})}
               />
             )}
           </div>

@@ -503,7 +503,8 @@ enum OperationType {
             const b = scout.badges[key as keyof typeof scout.badges];
             if (b && b.name) {
               const reqs = badgeSettings.requirements[b.name]?.[scout.stage] || [];
-              if (reqs.length > 0 && (b.completedRequirements || []).length === reqs.length) {
+              const hasPassed = checkBadgePassStatus(b.name, reqs, b.completedRequirements || [], b.requirementScores || {});
+              if (hasPassed) {
                 passed.push(b.name);
               }
             }

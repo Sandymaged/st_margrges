@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Award, Info, CheckCircle2, Circle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { Award, Info, CheckCircle2, XCircle, Circle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { BadgeProgress } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -12,6 +12,8 @@ interface BadgeProgressCardProps {
   hasCancellationRequest?: boolean;
   onCancelRequest?: () => void;
   showResults?: boolean;
+  isPastWave?: boolean;
+  isPassed?: boolean;
 }
 
 export default function BadgeProgressCard({ 
@@ -22,12 +24,16 @@ export default function BadgeProgressCard({
   requirementCategories = {},
   hasCancellationRequest,
   onCancelRequest,
-  showResults = true
+  showResults = true,
+  isPastWave = false,
+  isPassed = false
 }: BadgeProgressCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasReqs = requirements.length > 0;
   const completedReqs = showResults ? (badge.completedRequirements || []).filter(r => requirements.includes(r)) : [];
-  const isFullyCompleted = showResults && hasReqs && completedReqs.length === requirements.length;
+  
+  // We rely on isPassed from the parent to determine full completion.
+  const isFullyCompleted = showResults && hasReqs && isPassed;
 
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow relative">
@@ -42,14 +48,24 @@ export default function BadgeProgressCard({
           </div>
         </div>
         
-        {onCancelRequest && !isFullyCompleted && (
+        {isFullyCompleted ? (
+          <div className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-50 text-green-600 border border-green-100">
+            <CheckCircle2 size={14} />
+            تم اجتياز الشارة
+          </div>
+        ) : isPastWave && showResults && !isFullyCompleted ? (
+          <div className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-100">
+            <XCircle size={14} />
+            لم يتم اجتياز الشارة
+          </div>
+        ) : onCancelRequest && !isFullyCompleted && !isPastWave && (
           <button
             onClick={onCancelRequest}
             disabled={hasCancellationRequest}
             className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
               hasCancellationRequest 
                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                : 'bg-red-50 text-red-600 hover:bg-red-100'
+                : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-100'
             }`}
           >
             <Trash2 size={14} />
