@@ -391,7 +391,9 @@ enum OperationType {
           scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
           allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES],
           badgePrice: data.badgePrice || 30,
-          attendanceDates: data.attendanceDates || []
+          attendanceDates: data.attendanceDates || [],
+          activeWave: data.activeWave || 'wave1',
+          showResults: data.showResults || false
         });
       }
     });
@@ -535,6 +537,52 @@ enum OperationType {
       setMessage({ type: 'success', text: 'تم إنهاء الدفعة الأولى بنجاح، وتم تفعيل الدفعة الثانية وإظهار النتائج.' });
     } catch (error) {
       handleFirestoreError(error, 'End Wave 1', 'batch');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRevertWave1 = async () => {
+    if (!window.confirm('هل أنت متأكد من التراجع عن إنهاء الدفعة الأولى؟ (للتجربة فقط: سيتم استرجاع شارات الكشافة للدفعة الأولى)')) return;
+    
+    try {
+      setLoading(true);
+      
+      const chunkArray = (arr: any[], size: number) => {
+        return Array.from({ length: Math.ceil(arr.length / size) }, (v, i) =>
+          arr.slice(i * size, i * size + size)
+        );
+      };
+      
+      const scoutChunks = chunkArray(scouts, 490);
+      
+      for (const chunk of scoutChunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(scout => {
+          if (scout.pastWaves && scout.pastWaves.wave1) {
+            batch.update(doc(db, 'users', scout.uid), {
+              badges: scout.pastWaves.wave1.badges,
+              pastWaves: {
+                ...scout.pastWaves,
+                wave1: deleteField()
+              },
+              passedBadges: deleteField()
+            });
+          }
+        });
+        await batch.commit();
+      }
+      
+      const settingsBatch = writeBatch(db);
+      settingsBatch.update(doc(db, 'settings', 'general'), {
+        activeWave: 'wave1',
+        showResults: false
+      });
+      await settingsBatch.commit();
+      
+      setMessage({ type: 'success', text: 'تم التراجع عن إنهاء الدفعة الأولى بنجاح.' });
+    } catch (error) {
+      handleFirestoreError(error, 'Revert Wave 1', 'batch');
     } finally {
       setLoading(false);
     }
@@ -1929,6 +1977,7 @@ enum OperationType {
   if (isSuperAdmin) {
     availableTabs.push('groupLinks');
   }
+  if (canManageAllBadges || isSuperAdmin) availableTabs.push('cancellationRequests');
   if (canManageAllBadges || canManageBadgeRequirements) availableTabs.push('requirements');
   if (isSuperAdmin) availableTabs.push('general', 'activity_logs', 'deleted_accounts_logs');
   if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
@@ -3185,6 +3234,21 @@ enum OperationType {
                         </button>
                         <p className="text-xs text-purple-600 mt-2 text-center font-bold">
                           تنبيه: سيتم حفظ نتائج الكشافة الحالية، ونقل الشارات الناجحة، وتفريغ الاختيارات لبدء الدفعة الثانية.
+                        </p>
+                      </div>
+                    )}
+                    
+                    {generalSettings.activeWave === 'wave2' && (
+                      <div className="pt-4 border-t border-purple-200">
+                        <button
+                          onClick={handleRevertWave1}
+                          disabled={loading}
+                          className="w-full py-3 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          التراجع عن إنهاء الدفعة الأولى (للتجربة فقط)
+                        </button>
+                        <p className="text-xs text-red-600 mt-2 text-center font-bold">
+                          تنبيه: سيتم إرجاع بيانات الدفعة الأولى واستعادة الشارات السابقة كما كانت قبل الإنهاء.
                         </p>
                       </div>
                     )}

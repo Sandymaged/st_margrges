@@ -32,6 +32,7 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && (
         (exists(/databases/$(database)/documents/settings/superadmins) && 
+         'email' in request.auth.token && request.auth.token.email != null &&
          request.auth.token.email in get(/databases/$(database)/documents/settings/superadmins).data.emails) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'scout') == 'admin' ||
@@ -68,6 +69,7 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isAuthenticated() && (
         (exists(/databases/$(database)/documents/settings/superadmins) && 
+         'email' in request.auth.token && request.auth.token.email != null &&
          request.auth.token.email in get(/databases/$(database)/documents/settings/superadmins).data.emails) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canManagePermissions', false) == true
@@ -133,6 +135,7 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canManagePermissions', false) == true ||
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get('canDeleteAccounts', false) == true ||
         (exists(/databases/$(database)/documents/settings/superadmins) && 
+         'email' in request.auth.token && request.auth.token.email != null &&
          request.auth.token.email in get(/databases/$(database)/documents/settings/superadmins).data.emails)
       );
     }
@@ -145,7 +148,7 @@ service cloud.firestore {
     
     match /cancellationRequests/{requestId} {
       allow read: if isAdmin() || isOwner(resource.data.userId);
-      allow create: if isOwner(request.resource.data.userId);
+      allow create: if isAdmin() || isOwner(request.resource.data.userId);
       allow delete: if isAdmin();
     }
   }

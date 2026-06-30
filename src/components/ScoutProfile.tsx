@@ -44,6 +44,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
       if (docSnap.exists()) {
         const data = docSnap.data() as GeneralSettings;
         setGeneralSettings({
+          ...data,
           logoUrl: '/syncc.png',
           scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
           badgePrice: data.badgePrice || 30,
