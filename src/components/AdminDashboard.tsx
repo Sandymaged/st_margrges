@@ -254,7 +254,7 @@ enum OperationType {
   const canManageAttendance = isSuperAdmin || currentProfile?.permissions?.canManageAttendance;
   const canManagePayments = isSuperAdmin || currentProfile?.permissions?.canManagePayments;
   const canManageBadgeRequirements = isSuperAdmin || currentProfile?.permissions?.canManageBadgeRequirements;
-  const canAccessSettings = canManageAllBadges || canManageAttendance || canManagePayments || canDeleteAccounts || canManageBadgeRequirements;
+  const canAccessSettings = canManageAllBadges || canManageAttendance || canManagePayments || canDeleteAccounts;
   
   const canDeleteThisScout = (scout: ScoutProfile) => {
     if (scout.uid === currentProfile?.uid) return false;
@@ -1976,7 +1976,7 @@ enum OperationType {
     availableTabs.push('groupLinks');
   }
   if (canManageAllBadges || isSuperAdmin) availableTabs.push('cancellationRequests');
-  if (canManageAllBadges || canManageBadgeRequirements) availableTabs.push('requirements');
+  if (canManageAllBadges) availableTabs.push('requirements');
   if (isSuperAdmin) availableTabs.push('general', 'activity_logs', 'deleted_accounts_logs');
   if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
   if (canDeleteAccounts) availableTabs.push('cleanup');
@@ -2083,7 +2083,7 @@ enum OperationType {
                 روابط المجموعات
               </button>
             )}
-            {(canManageAllBadges || canManageBadgeRequirements) && (
+            {canManageAllBadges && (
               <button
                 onClick={() => setSettingsTab('requirements')}
                 className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
