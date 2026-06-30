@@ -562,10 +562,7 @@ enum OperationType {
           if (scout.pastWaves && scout.pastWaves.wave1) {
             batch.update(doc(db, 'users', scout.uid), {
               badges: scout.pastWaves.wave1.badges,
-              pastWaves: {
-                ...scout.pastWaves,
-                wave1: deleteField()
-              },
+              'pastWaves.wave1': deleteField(),
               passedBadges: deleteField()
             });
           }
