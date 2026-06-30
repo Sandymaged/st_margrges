@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ScoutProfile, BadgeSettings, GeneralSettings, BadgeCancellationRequest } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
-import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle } from 'lucide-react';
+import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle, Award } from 'lucide-react';
 import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
@@ -411,8 +411,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 {badgeSettings.categories.map(category => {
                   const allBadges = new Set([...(category.badges || [])]);
                   if (category.stageBadges) {
-                    Object.values(category.stageBadges).forEach(badges => {
-                      if (badges) badges.forEach(b => allBadges.add(b));
+                    Object.values(category.stageBadges).forEach((badges: any) => {
+                      if (badges) badges.forEach((b: string) => allBadges.add(b));
                     });
                   }
                   
