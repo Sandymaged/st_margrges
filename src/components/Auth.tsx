@@ -98,6 +98,7 @@ export default function Auth() {
   const [badge2, setBadge2] = useState('');
   const [badge3, setBadge3] = useState('');
   
+  const [selectedCategory1, setSelectedCategory1] = useState('');
   const [selectedCategory2, setSelectedCategory2] = useState('');
   const [selectedCategory3, setSelectedCategory3] = useState('');
   const [visibleBadges, setVisibleBadges] = useState<number>(1);
@@ -159,8 +160,12 @@ export default function Auth() {
 
   // Update badge selections when settings or stage/category change
   useEffect(() => {
-    const badges1 = getAvailableBadges('scout', stage);
-    if (!badges1.includes(badge1)) {
+    if (selectedCategory1) {
+      const badges1 = getAvailableBadges(selectedCategory1, stage);
+      if (!badges1.includes(badge1)) {
+        setBadge1("");
+      }
+    } else {
       setBadge1("");
     }
     
@@ -181,7 +186,7 @@ export default function Auth() {
     } else {
       setBadge3("");
     }
-  }, [badgeSettings, stage, selectedCategory2, selectedCategory3]);
+  }, [badgeSettings, stage, selectedCategory1, selectedCategory2, selectedCategory3]);
 
   useEffect(() => {
     if (auth.currentUser) {
@@ -467,17 +472,35 @@ export default function Auth() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Badge 1 */}
-                    <div className="space-y-3">
+                    <div className="space-y-3 relative p-4 md:p-0 bg-gray-50 md:bg-transparent rounded-xl border md:border-none border-gray-100">
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">شارة 1 (كشفية)</label>
+                        <label className="text-xs font-bold text-gray-700">شارة 1</label>
+                        <select
+                          value={selectedCategory1}
+                          onChange={(e) => {
+                            setSelectedCategory1(e.target.value);
+                            setBadge1('');
+                          }}
+                          className="w-full px-4 py-2 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-xs shadow-sm"
+                          required
+                        >
+                          <option value="">-- الفئة --</option>
+                          {(badgeSettings.categories || [])
+                            .map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
                         <select
                           value={badge1}
                           onChange={(e) => setBadge1(e.target.value)}
-                          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm"
+                          disabled={!selectedCategory1}
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50 disabled:text-gray-400"
                           required
                         >
                           <option value="">-- اختر شارة --</option>
-                          {getAvailableBadges('scout', stage).map(b => <option key={b} value={b} disabled={b === badge2 || b === badge3}>{b}</option>)}
+                          {selectedCategory1 && getAvailableBadges(selectedCategory1, stage).map(b => <option key={b} value={b} disabled={b === badge2 || b === badge3}>{b}</option>)}
                         </select>
                       </div>
                     </div>

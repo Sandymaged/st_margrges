@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ScoutProfile, BadgeSettings, GeneralSettings } from '../types';
+import { ScoutProfile, BadgeSettings, GeneralSettings, BadgeCancellationRequest } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
 import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle } from 'lucide-react';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -22,6 +22,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
     badgePrice: 30,
     attendanceDates: []
   });
+  const [cancellationRequests, setCancellationRequests] = useState<Record<string, boolean>>({});
   
   const qrRef = useRef<HTMLCanvasElement>(null);
 
@@ -50,12 +51,39 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
         });
       }
     });
+    
+    const q = query(collection(db, 'cancellationRequests'), where('userId', '==', profile.uid));
+    const unsubRequests = onSnapshot(q, (snapshot) => {
+      const requestsMap: Record<string, boolean> = {};
+      snapshot.forEach(doc => {
+        const data = doc.data() as BadgeCancellationRequest;
+        requestsMap[data.badgeKey] = true;
+      });
+      setCancellationRequests(requestsMap);
+    });
 
     return () => {
       unsubSettings();
       unsubGeneral();
+      unsubRequests();
     };
-  }, []);
+  }, [profile.uid]);
+
+  const handleCancelBadgeRequest = async (badgeKey: 'badge1' | 'badge2' | 'badge3', badgeName: string) => {
+    try {
+      await addDoc(collection(db, 'cancellationRequests'), {
+        userId: profile.uid,
+        userName: profile.name,
+        stage: profile.stage,
+        badgeKey,
+        badgeName,
+        createdAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error requesting badge cancellation:', error);
+      alert('حدث خطأ أثناء إرسال الطلب');
+    }
+  };
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return 'غير متوفر';
@@ -333,6 +361,9 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirements={getScoutBadgeRequirements(profile.badges.badge1.name, profile.stage)} 
               requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge1.name] || {}}
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge1.name] || {}}
+              hasCancellationRequest={!!cancellationRequests['badge1']}
+              onCancelRequest={() => handleCancelBadgeRequest('badge1', profile.badges.badge1.name)}
+              showResults={generalSettings.showResults}
             />
           )}
           {profile.badges.badge2?.name && (
@@ -342,6 +373,9 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirements={getScoutBadgeRequirements(profile.badges.badge2.name, profile.stage)} 
               requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge2.name] || {}}
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge2.name] || {}}
+              hasCancellationRequest={!!cancellationRequests['badge2']}
+              onCancelRequest={() => handleCancelBadgeRequest('badge2', profile.badges.badge2.name)}
+              showResults={generalSettings.showResults}
             />
           )}
           {profile.badges.badge3?.name && (
@@ -351,6 +385,9 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirements={getScoutBadgeRequirements(profile.badges.badge3.name, profile.stage)} 
               requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge3.name] || {}}
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge3.name] || {}}
+              hasCancellationRequest={!!cancellationRequests['badge3']}
+              onCancelRequest={() => handleCancelBadgeRequest('badge3', profile.badges.badge3.name)}
+              showResults={generalSettings.showResults}
             />
           )}
           {[profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].filter(b => b && b.name).length < 3 && (
@@ -370,28 +407,81 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 defaultValue=""
               >
                 <option value="" disabled>تقديم على شارة أخرى</option>
-                {badgeSettings.categories.map(category => (
-                  <optgroup key={category.name} label={category.name}>
-                    {Array.isArray(category.badges) ? category.badges.map(badge => {
+                {badgeSettings.categories.map(category => {
+                  const allBadges = new Set([...(category.badges || [])]);
+                  if (category.stageBadges) {
+                    Object.values(category.stageBadges).forEach(badges => {
+                      if (badges) badges.forEach(b => allBadges.add(b));
+                    });
+                  }
+                  
+                  return (
+                  <optgroup key={category.id || category.name} label={category.name}>
+                    {Array.from(allBadges).map(badge => {
                       const isSelected = [profile.badges.badge1.name, profile.badges.badge2.name, profile.badges.badge3.name].includes(badge);
+                      const hasPassed = profile.passedBadges?.includes(badge);
+                      const isDisabled = isSelected || hasPassed;
+                      
                       return (
                         <option 
                           key={badge} 
                           value={badge} 
-                          disabled={isSelected}
-                          className={isSelected ? 'text-gray-400 font-medium' : 'text-gray-900'}
+                          disabled={isDisabled}
+                          className={isDisabled ? 'text-gray-400 font-medium' : 'text-gray-900'}
                         >
-                          {badge}
+                          {badge} {hasPassed ? '(مجتازة)' : ''}
                         </option>
                       );
-                    }) : null}
+                    })}
                   </optgroup>
-                ))}
+                )})}
               </select>
             </div>
           )}
         </div>
       </div>
+
+      {/* Past Waves Section */}
+      {profile.pastWaves?.wave1 && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-3 px-2">
+            <Award className="text-[#34A853]" size={24} />
+            <h3 className="text-2xl font-bold text-gray-800">أرشيف الشارات (الدفعة الأولى)</h3>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {profile.pastWaves.wave1.badges.badge1?.name && (
+              <BadgeProgressCard 
+                label="شارة 1 (سابقة)" 
+                badge={profile.pastWaves.wave1.badges.badge1} 
+                requirements={getScoutBadgeRequirements(profile.pastWaves.wave1.badges.badge1.name, profile.stage)} 
+                requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.pastWaves.wave1.badges.badge1.name] || {}}
+                requirementCategories={badgeSettings.requirementCategories?.[profile.pastWaves.wave1.badges.badge1.name] || {}}
+                showResults={true}
+              />
+            )}
+            {profile.pastWaves.wave1.badges.badge2?.name && (
+              <BadgeProgressCard 
+                label="شارة 2 (سابقة)" 
+                badge={profile.pastWaves.wave1.badges.badge2} 
+                requirements={getScoutBadgeRequirements(profile.pastWaves.wave1.badges.badge2.name, profile.stage)} 
+                requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.pastWaves.wave1.badges.badge2.name] || {}}
+                requirementCategories={badgeSettings.requirementCategories?.[profile.pastWaves.wave1.badges.badge2.name] || {}}
+                showResults={true}
+              />
+            )}
+            {profile.pastWaves.wave1.badges.badge3?.name && (
+              <BadgeProgressCard 
+                label="شارة 3 (سابقة)" 
+                badge={profile.pastWaves.wave1.badges.badge3} 
+                requirements={getScoutBadgeRequirements(profile.pastWaves.wave1.badges.badge3.name, profile.stage)} 
+                requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.pastWaves.wave1.badges.badge3.name] || {}}
+                requirementCategories={badgeSettings.requirementCategories?.[profile.pastWaves.wave1.badges.badge3.name] || {}}
+                showResults={true}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Attendance and Payment Section */}
       <div className="space-y-6">

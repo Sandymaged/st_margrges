@@ -43,6 +43,16 @@ export interface ScoutProfile {
     badge2: BadgeProgress;
     badge3: BadgeProgress;
   };
+  pastWaves?: {
+    wave1?: {
+      badges: {
+        badge1: BadgeProgress;
+        badge2: BadgeProgress;
+        badge3: BadgeProgress;
+      };
+    };
+  };
+  passedBadges?: string[];
   role: 'scout' | 'admin';
   isVerified: boolean;
   showWelcomeGroups?: boolean;
@@ -85,6 +95,18 @@ export interface GeneralSettings {
   allowedRegistrationStages?: Stage[];
   badgePrice?: number;
   attendanceDates?: string[];
+  activeWave?: 'wave1' | 'wave2';
+  showResults?: boolean;
+}
+
+export interface BadgeCancellationRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  stage: Stage;
+  badgeKey: 'badge1' | 'badge2' | 'badge3';
+  badgeName: string;
+  createdAt: any;
 }
 
 export const DEFAULT_CATEGORIES: BadgeCategory[] = [

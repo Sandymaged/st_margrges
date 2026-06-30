@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Award, Info, CheckCircle2, Circle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Award, Info, CheckCircle2, Circle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { BadgeProgress } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -9,15 +9,28 @@ interface BadgeProgressCardProps {
   requirements?: string[];
   requirementMaxScores?: Record<string, number>;
   requirementCategories?: Record<string, string>;
+  hasCancellationRequest?: boolean;
+  onCancelRequest?: () => void;
+  showResults?: boolean;
 }
 
-export default function BadgeProgressCard({ badge, label, requirements = [], requirementMaxScores = {}, requirementCategories = {} }: BadgeProgressCardProps) {
+export default function BadgeProgressCard({ 
+  badge, 
+  label, 
+  requirements = [], 
+  requirementMaxScores = {}, 
+  requirementCategories = {},
+  hasCancellationRequest,
+  onCancelRequest,
+  showResults = true
+}: BadgeProgressCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasReqs = requirements.length > 0;
-  const completedReqs = (badge.completedRequirements || []).filter(r => requirements.includes(r));
+  const completedReqs = showResults ? (badge.completedRequirements || []).filter(r => requirements.includes(r)) : [];
+  const isFullyCompleted = showResults && hasReqs && completedReqs.length === requirements.length;
 
   return (
-    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow relative">
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="bg-[#4285F4]/10 p-2 rounded-lg">
@@ -28,6 +41,21 @@ export default function BadgeProgressCard({ badge, label, requirements = [], req
             <h3 className="text-lg font-bold text-gray-800">{badge.name}</h3>
           </div>
         </div>
+        
+        {onCancelRequest && !isFullyCompleted && (
+          <button
+            onClick={onCancelRequest}
+            disabled={hasCancellationRequest}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              hasCancellationRequest 
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                : 'bg-red-50 text-red-600 hover:bg-red-100'
+            }`}
+          >
+            <Trash2 size={14} />
+            {hasCancellationRequest ? 'تم طلب الإلغاء' : 'إلغاء الشارة'}
+          </button>
+        )}
       </div>
 
       {hasReqs && (
@@ -85,9 +113,15 @@ export default function BadgeProgressCard({ badge, label, requirements = [], req
                           <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
                             {req}
                           </span>
-                          <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                            {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
-                          </span>
+                          {!showResults ? (
+                            <span className="text-xs font-bold mt-2 text-purple-600">
+                              قيد التقييم
+                            </span>
+                          ) : (
+                            <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                              {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );

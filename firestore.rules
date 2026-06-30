@@ -142,5 +142,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
       allow update: if false; // Logs generally shouldn't be edited
     }
+    
+    match /cancellationRequests/{requestId} {
+      allow read: if isAdmin() || isOwner(resource.data.userId);
+      allow create: if isOwner(request.resource.data.userId);
+      allow delete: if isAdmin();
+    }
   }
 }

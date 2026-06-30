@@ -15,7 +15,8 @@ import {
   BADGE_LABELS,
   BadgeProgress,
   PHONE_REGEX,
-  GeneralSettings
+  GeneralSettings,
+  BadgeCancellationRequest
 } from '../types';
 import { logActivity } from '../utils/logger';
 import QRScanner from './QRScanner';
@@ -44,7 +45,8 @@ import {
   Calendar,
   UserX,
   Download,
-  XCircle
+  XCircle,
+  AlertCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
@@ -55,7 +57,7 @@ interface AdminDashboardProps {
 }
 
 export default function AdminDashboard({ currentProfile }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'scouts' | 'settings' | 'grading'>('scouts');
+  const [activeTab, setActiveTab] = useState<'scouts' | 'settings' | 'grading' | 'cancellationRequests'>('scouts');
   const [gradingSelectedBadge, setGradingSelectedBadge] = useState<string>('');
   const [gradingSearchTerm, setGradingSearchTerm] = useState<string>('');
   const [gradingStageFilter, setGradingStageFilter] = useState<Stage | 'all'>('all');
@@ -68,6 +70,8 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   
   const [activeBadgeTab, setActiveBadgeTab] = useState<'badge1' | 'badge2' | 'badge3'>('badge1');
   const [scouts, setScouts] = useState<ScoutProfile[]>([]);
+  const [cancellationRequests, setCancellationRequests] = useState<BadgeCancellationRequest[]>([]);
+  const [selectedRequests, setSelectedRequests] = useState<string[]>([]);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [deletedAccountsLogs, setDeletedAccountsLogs] = useState<any[]>([]);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
@@ -91,7 +95,7 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [newRequirementInput, setNewRequirementInput] = useState('');
   const [newRequirementCategory, setNewRequirementCategory] = useState('');
   const [newRequirementScore, setNewRequirementScore] = useState('');
-  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance' | 'groupLinks'>('categories');
+  const [settingsTab, setSettingsTab] = useState<'categories' | 'requirements' | 'cleanup' | 'general' | 'attendance' | 'groupLinks' | 'cancellationRequests'>('categories');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerDate, setScannerDate] = useState<string | null>(null);
   const [scanLogs, setScanLogs] = useState<{uid: string, name: string, time: string, action: string}[]>([]);
@@ -416,14 +420,125 @@ enum OperationType {
       });
     }
 
+    const unsubscribeCancellationRequests = onSnapshot(query(collection(db, 'cancellationRequests')), (snapshot) => {
+      const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as BadgeCancellationRequest));
+      setCancellationRequests(requests);
+    });
+
     return () => {
       unsubscribeUsers();
       unsubscribeSettings();
       unsubscribeGeneralSettings();
+      unsubscribeCancellationRequests();
       if (unsubscribeLogs) unsubscribeLogs();
       if (unsubscribeDeletedLogs) unsubscribeDeletedLogs();
     };
   }, [isSuperAdmin]);
+
+  const handleApproveCancellations = async () => {
+    try {
+      setLoading(true);
+      const batch = writeBatch(db);
+      const requestsToProcess = cancellationRequests.filter(r => selectedRequests.includes(r.id));
+      
+      for (const req of requestsToProcess) {
+        const userDoc = doc(db, 'users', req.userId);
+        batch.update(userDoc, {
+          [`badges.${req.badgeKey}`]: { name: '', progress: 0, notes: '', completedRequirements: [] }
+        });
+        
+        const reqDoc = doc(db, 'cancellationRequests', req.id);
+        batch.delete(reqDoc);
+      }
+      
+      await batch.commit();
+      setSelectedRequests([]);
+      setMessage({ type: 'success', text: 'تم الموافقة على الطلبات المحددة بنجاح' });
+    } catch (error) {
+      handleFirestoreError(error, 'Approve Cancellations', 'batch');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectCancellations = async () => {
+    try {
+      setLoading(true);
+      const batch = writeBatch(db);
+      selectedRequests.forEach(id => {
+        batch.delete(doc(db, 'cancellationRequests', id));
+      });
+      await batch.commit();
+      setSelectedRequests([]);
+      setMessage({ type: 'success', text: 'تم رفض الطلبات المحددة وإزالتها' });
+    } catch (error) {
+      handleFirestoreError(error, 'Reject Cancellations', 'batch');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEndWave1 = async () => {
+    if (!window.confirm('هل أنت متأكد من إنهاء الدفعة الأولى؟ سيتم حفظ نتائج الكشافة الحالية في أرشيف الدفعة الأولى، ونقل الشارات الناجحة، والسماح لهم باختيار شارات الدفعة الثانية. هذا الإجراء لا يمكن التراجع عنه بسهولة.')) return;
+    
+    try {
+      setLoading(true);
+      
+      const chunkArray = (arr: any[], size: number) => {
+        return Array.from({ length: Math.ceil(arr.length / size) }, (v, i) =>
+          arr.slice(i * size, i * size + size)
+        );
+      };
+      
+      const scoutChunks = chunkArray(scouts, 490);
+      
+      for (const chunk of scoutChunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(scout => {
+          const passed: string[] = [];
+          // Check badge1, badge2, badge3
+          ['badge1', 'badge2', 'badge3'].forEach(key => {
+            const b = scout.badges[key as keyof typeof scout.badges];
+            if (b && b.name) {
+              const reqs = badgeSettings.requirements[b.name]?.[scout.stage] || [];
+              if (reqs.length > 0 && (b.completedRequirements || []).length === reqs.length) {
+                passed.push(b.name);
+              }
+            }
+          });
+
+          const newPassedBadges = Array.from(new Set([...(scout.passedBadges || []), ...passed]));
+          
+          batch.update(doc(db, 'users', scout.uid), {
+            pastWaves: {
+              ...(scout.pastWaves || {}),
+              wave1: { badges: scout.badges }
+            },
+            passedBadges: newPassedBadges,
+            badges: {
+              badge1: { name: '', progress: 0, notes: '', completedRequirements: [] },
+              badge2: { name: '', progress: 0, notes: '', completedRequirements: [] },
+              badge3: { name: '', progress: 0, notes: '', completedRequirements: [] }
+            }
+          });
+        });
+        await batch.commit();
+      }
+      
+      const settingsBatch = writeBatch(db);
+      settingsBatch.update(doc(db, 'settings', 'general'), {
+        activeWave: 'wave2',
+        showResults: true
+      });
+      await settingsBatch.commit();
+      
+      setMessage({ type: 'success', text: 'تم إنهاء الدفعة الأولى بنجاح، وتم تفعيل الدفعة الثانية وإظهار النتائج.' });
+    } catch (error) {
+      handleFirestoreError(error, 'End Wave 1', 'batch');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const exportGradingToExcel = () => {
     if (!gradingSelectedBadge) return;
@@ -1905,6 +2020,14 @@ enum OperationType {
                 تصنيف الشارات
               </button>
             )}
+            {(canManageAllBadges || isSuperAdmin) && (
+              <button
+                onClick={() => setSettingsTab('cancellationRequests')}
+                className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'cancellationRequests' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                طلبات الإلغاء
+              </button>
+            )}
             {isSuperAdmin && (
               <button
                 onClick={() => setSettingsTab('groupLinks')}
@@ -1961,7 +2084,103 @@ enum OperationType {
             )}
           </div>
 
-          {activeSettingsTab === 'categories' ? (
+          {activeSettingsTab === 'cancellationRequests' ? (
+            <div className="space-y-8">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-800 mb-2">طلبات إلغاء الشارات</h2>
+                  <p className="text-gray-500">طلبات الكشافة لإلغاء شاراتهم الحالية للتقديم على شارات أخرى.</p>
+                </div>
+                {selectedRequests.length > 0 && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleApproveCancellations}
+                      disabled={loading}
+                      className="px-4 py-2 bg-[#34A853] text-white rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center gap-2 text-sm"
+                    >
+                      <CheckCircle2 size={16} />
+                      موافقة ({selectedRequests.length})
+                    </button>
+                    <button
+                      onClick={handleRejectCancellations}
+                      disabled={loading}
+                      className="px-4 py-2 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center gap-2 text-sm"
+                    >
+                      <XCircle size={16} />
+                      رفض ({selectedRequests.length})
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {cancellationRequests.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                  <ShieldCheck size={48} className="mx-auto text-gray-400 mb-4" />
+                  <h3 className="text-xl font-bold text-gray-600 mb-2">لا توجد طلبات إلغاء</h3>
+                  <p className="text-gray-500">لا يوجد أي طلبات قيد الانتظار حالياً.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right whitespace-nowrap">
+                      <thead className="bg-gray-50 border-b border-gray-100">
+                        <tr>
+                          <th className="p-4 w-12">
+                            <input
+                              type="checkbox"
+                              checked={selectedRequests.length === cancellationRequests.length}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedRequests(cancellationRequests.map(r => r.id));
+                                } else {
+                                  setSelectedRequests([]);
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                            />
+                          </th>
+                          <th className="p-4 font-bold text-gray-700 text-sm">اسم الكشاف</th>
+                          <th className="p-4 font-bold text-gray-700 text-sm">المرحلة</th>
+                          <th className="p-4 font-bold text-gray-700 text-sm">الشارة المطلوب إلغاؤها</th>
+                          <th className="p-4 font-bold text-gray-700 text-sm">تاريخ الطلب</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cancellationRequests.map(req => (
+                          <tr key={req.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                            <td className="p-4">
+                              <input
+                                type="checkbox"
+                                checked={selectedRequests.includes(req.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedRequests(prev => [...prev, req.id]);
+                                  } else {
+                                    setSelectedRequests(prev => prev.filter(id => id !== req.id));
+                                  }
+                                }}
+                                className="w-4 h-4 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4]"
+                              />
+                            </td>
+                            <td className="p-4 font-bold text-gray-800">{req.userName}</td>
+                            <td className="p-4 text-gray-600">{req.stage}</td>
+                            <td className="p-4">
+                              <span className="bg-red-50 text-red-600 px-3 py-1 rounded-lg text-sm font-bold">
+                                {req.badgeName}
+                              </span>
+                            </td>
+                            <td className="p-4 text-gray-500 text-sm">
+                              {req.createdAt?.toDate ? req.createdAt.toDate().toLocaleDateString('ar-EG') : 'غير متوفر'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : activeSettingsTab === 'categories' ? (
             <div className="space-y-8">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -2909,6 +3128,66 @@ enum OperationType {
                     >
                       حفظ التعديل
                     </button>
+                  </div>
+                </div>
+
+                <div className="bg-purple-50 p-6 rounded-3xl border border-purple-100">
+                  <h3 className="text-lg font-bold text-purple-900 mb-4">نظام الدفعات (Waves)</h3>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <p className="font-bold text-purple-900">الدفعة الحالية</p>
+                        <p className="text-xs text-purple-700">تحديد الدفعة النشطة حالياً.</p>
+                      </div>
+                      <select
+                        value={generalSettings.activeWave || 'wave1'}
+                        onChange={async (e) => {
+                          const val = e.target.value as 'wave1' | 'wave2';
+                          await setDoc(doc(db, 'settings', 'general'), {
+                            activeWave: val
+                          }, { merge: true });
+                        }}
+                        className="px-4 py-2 rounded-xl border border-purple-200 outline-none font-bold text-sm bg-white"
+                      >
+                        <option value="wave1">الدفعة الأولى (Wave 1)</option>
+                        <option value="wave2">الدفعة الثانية (Wave 2)</option>
+                      </select>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <p className="font-bold text-purple-900">إظهار نتائج النجاح للكشافة</p>
+                        <p className="text-xs text-purple-700">إذا تم التفعيل، سيتمكن الكشافة من رؤية ما إذا كانوا قد اجتازوا شاراتهم.</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={generalSettings.showResults || false}
+                          onChange={async (e) => {
+                            await setDoc(doc(db, 'settings', 'general'), {
+                              showResults: e.target.checked
+                            }, { merge: true });
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                      </label>
+                    </div>
+
+                    {generalSettings.activeWave === 'wave1' && (
+                      <div className="pt-4 border-t border-purple-200">
+                        <button
+                          onClick={handleEndWave1}
+                          disabled={loading}
+                          className="w-full py-3 bg-purple-600 text-white font-black rounded-xl hover:bg-purple-700 transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          إنهاء الدفعة الأولى (Wave 1) وبدء الدفعة الثانية
+                        </button>
+                        <p className="text-xs text-purple-600 mt-2 text-center font-bold">
+                          تنبيه: سيتم حفظ نتائج الكشافة الحالية، ونقل الشارات الناجحة، وتفريغ الاختيارات لبدء الدفعة الثانية.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
