@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ScoutProfile, BadgeSettings, GeneralSettings, BadgeCancellationRequest } from '../types';
+import { ScoutProfile, BadgeSettings, GeneralSettings } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
-import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle, Award } from 'lucide-react';
+import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle, Award, Trash2 } from 'lucide-react';
 import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
@@ -22,7 +22,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
     badgePrice: 30,
     attendanceDates: []
   });
-  const [cancellationRequests, setCancellationRequests] = useState<Record<string, boolean>>({});
+  const [cancelBadgeConfirm, setCancelBadgeConfirm] = useState<{key: 'badge1' | 'badge2' | 'badge3', name: string} | null>(null);
+  const [isCancelChecked, setIsCancelChecked] = useState(false);
   
   const qrRef = useRef<HTMLCanvasElement>(null);
 
@@ -53,36 +54,42 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
       }
     });
     
-    const q = query(collection(db, 'cancellationRequests'), where('userId', '==', profile.uid));
-    const unsubRequests = onSnapshot(q, (snapshot) => {
-      const requestsMap: Record<string, boolean> = {};
-      snapshot.forEach(doc => {
-        const data = doc.data() as BadgeCancellationRequest;
-        requestsMap[data.badgeKey] = true;
-      });
-      setCancellationRequests(requestsMap);
-    });
-
     return () => {
       unsubSettings();
       unsubGeneral();
-      unsubRequests();
     };
   }, [profile.uid]);
 
-  const handleCancelBadgeRequest = async (badgeKey: 'badge1' | 'badge2' | 'badge3', badgeName: string) => {
+  const handleCancelBadgeRequest = (badgeKey: 'badge1' | 'badge2' | 'badge3', badgeName: string) => {
+    setCancelBadgeConfirm({ key: badgeKey, name: badgeName });
+    setIsCancelChecked(false);
+  };
+
+  const executeCancelBadge = async () => {
+    if (!cancelBadgeConfirm) return;
+    
+    // Alert the user one more time as a final check
+    if (!window.confirm('هذا الأمر غير قابل للرجوع. هل أنت متأكد من إلغاء الشارة؟')) {
+      return;
+    }
+
     try {
-      await addDoc(collection(db, 'cancellationRequests'), {
-        userId: profile.uid,
-        userName: profile.name,
-        stage: profile.stage,
-        badgeKey,
-        badgeName,
-        createdAt: serverTimestamp()
-      });
+      const userRef = doc(db, 'users', profile.uid);
+      const updatedBadges = { ...profile.badges };
+      
+      // Remove the badge data
+      updatedBadges[cancelBadgeConfirm.key] = {
+        name: '',
+        completedRequirements: [],
+        requirementScores: {}
+      };
+
+      await updateDoc(userRef, { badges: updatedBadges });
+      setCancelBadgeConfirm(null);
+      alert('تم إلغاء الشارة بنجاح');
     } catch (error) {
-      console.error('Error requesting badge cancellation:', error);
-      alert('حدث خطأ أثناء إرسال الطلب');
+      console.error('Error canceling badge:', error);
+      alert('حدث خطأ أثناء إلغاء الشارة');
     }
   };
 
@@ -404,8 +411,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirements={getScoutBadgeRequirements(profile.badges.badge1.name, profile.stage)} 
               requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge1.name] || {}}
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge1.name] || {}}
-              hasCancellationRequest={!!cancellationRequests['badge1']}
-              onCancelRequest={() => handleCancelBadgeRequest('badge1', profile.badges.badge1.name)}
+              onCancelBadge={() => handleCancelBadgeRequest('badge1', profile.badges.badge1.name)}
               showResults={generalSettings.showResults}
               isPassed={checkBadgePassStatus(profile.badges.badge1.name, profile.stage, profile.badges.badge1.completedRequirements || [], profile.badges.badge1.requirementScores || {})}
             />
@@ -417,8 +423,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirements={getScoutBadgeRequirements(profile.badges.badge2.name, profile.stage)} 
               requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge2.name] || {}}
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge2.name] || {}}
-              hasCancellationRequest={!!cancellationRequests['badge2']}
-              onCancelRequest={() => handleCancelBadgeRequest('badge2', profile.badges.badge2.name)}
+              onCancelBadge={() => handleCancelBadgeRequest('badge2', profile.badges.badge2.name)}
               showResults={generalSettings.showResults}
               isPassed={checkBadgePassStatus(profile.badges.badge2.name, profile.stage, profile.badges.badge2.completedRequirements || [], profile.badges.badge2.requirementScores || {})}
             />
@@ -430,8 +435,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirements={getScoutBadgeRequirements(profile.badges.badge3.name, profile.stage)} 
               requirementMaxScores={badgeSettings.requirementMaxScores?.[profile.badges.badge3.name] || {}}
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge3.name] || {}}
-              hasCancellationRequest={!!cancellationRequests['badge3']}
-              onCancelRequest={() => handleCancelBadgeRequest('badge3', profile.badges.badge3.name)}
+              onCancelBadge={() => handleCancelBadgeRequest('badge3', profile.badges.badge3.name)}
               showResults={generalSettings.showResults}
               isPassed={checkBadgePassStatus(profile.badges.badge3.name, profile.stage, profile.badges.badge3.completedRequirements || [], profile.badges.badge3.requirementScores || {})}
             />
@@ -651,6 +655,56 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
           </div>
         </div>
       </div>
+      {/* Cancel Badge Confirm Modal */}
+      {cancelBadgeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-xl relative animate-in fade-in zoom-in-95 duration-200 border border-gray-100">
+            <button
+              onClick={() => setCancelBadgeConfirm(null)}
+              className="absolute top-4 left-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <XCircle size={24} />
+            </button>
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-100 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} />
+              </div>
+              <h2 className="text-2xl font-black text-gray-800 mb-2">إلغاء شارة {cancelBadgeConfirm.name}</h2>
+              <p className="text-red-600 font-bold bg-red-50 p-4 rounded-xl">
+                خلي بالك لو لغيت الشارة البنود ألي سلمتها والدرجات ألي اتحسبتلك فيها هتضيع ومش هينفع ترجع نهائي
+              </p>
+            </div>
+            
+            <div className="space-y-4">
+              <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={isCancelChecked}
+                  onChange={(e) => setIsCancelChecked(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-300 text-red-600 focus:ring-red-600 cursor-pointer"
+                />
+                <span className="font-bold text-gray-700 select-none">أنا أؤكد رغبتي في إلغاء الشارة</span>
+              </label>
+
+              <button
+                onClick={executeCancelBadge}
+                disabled={!isCancelChecked}
+                className={`w-full py-4 text-white rounded-xl font-bold transition-colors shadow-sm ${
+                  isCancelChecked ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-300 cursor-not-allowed'
+                }`}
+              >
+                تأكيد إلغاء الشارة
+              </button>
+              <button
+                onClick={() => setCancelBadgeConfirm(null)}
+                className="w-full py-4 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-colors"
+              >
+                تراجع
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

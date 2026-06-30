@@ -99,16 +99,6 @@ export interface GeneralSettings {
   showResults?: boolean;
 }
 
-export interface BadgeCancellationRequest {
-  id: string;
-  userId: string;
-  userName: string;
-  stage: Stage;
-  badgeKey: 'badge1' | 'badge2' | 'badge3';
-  badgeName: string;
-  createdAt: any;
-}
-
 export const DEFAULT_CATEGORIES: BadgeCategory[] = [
   {
     id: 'scout',

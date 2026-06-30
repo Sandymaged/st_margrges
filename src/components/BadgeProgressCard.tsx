@@ -9,8 +9,7 @@ interface BadgeProgressCardProps {
   requirements?: string[];
   requirementMaxScores?: Record<string, number>;
   requirementCategories?: Record<string, string>;
-  hasCancellationRequest?: boolean;
-  onCancelRequest?: () => void;
+  onCancelBadge?: () => void;
   showResults?: boolean;
   isPastWave?: boolean;
   isPassed?: boolean;
@@ -22,8 +21,7 @@ export default function BadgeProgressCard({
   requirements = [], 
   requirementMaxScores = {}, 
   requirementCategories = {},
-  hasCancellationRequest,
-  onCancelRequest,
+  onCancelBadge,
   showResults = true,
   isPastWave = false,
   isPassed = false
@@ -58,18 +56,13 @@ export default function BadgeProgressCard({
             <XCircle size={14} />
             لم يتم اجتياز الشارة
           </div>
-        ) : onCancelRequest && !isFullyCompleted && !isPastWave && (
+        ) : onCancelBadge && !isFullyCompleted && !isPastWave && (
           <button
-            onClick={onCancelRequest}
-            disabled={hasCancellationRequest}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-              hasCancellationRequest 
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-100'
-            }`}
+            onClick={onCancelBadge}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors bg-red-50 text-red-600 hover:bg-red-100 border border-red-100"
           >
             <Trash2 size={14} />
-            {hasCancellationRequest ? 'تم طلب الإلغاء' : 'إلغاء الشارة'}
+            إلغاء الشارة
           </button>
         )}
       </div>
