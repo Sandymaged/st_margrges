@@ -353,6 +353,43 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               requirementCategories={badgeSettings.requirementCategories?.[profile.badges.badge3.name] || {}}
             />
           )}
+          {[profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].filter(b => b && b.name).length < 3 && (
+            <div className="flex items-center justify-center border-2 border-dashed border-gray-200 rounded-3xl p-6">
+              <select
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-gray-700"
+                onChange={async (e) => {
+                  if (!e.target.value) return;
+                  const newBadge = { name: e.target.value, progress: 0, notes: '' };
+                  const updatedBadges = { ...profile.badges };
+                  if (!updatedBadges.badge1.name) updatedBadges.badge1 = newBadge;
+                  else if (!updatedBadges.badge2.name) updatedBadges.badge2 = newBadge;
+                  else updatedBadges.badge3 = newBadge;
+                  
+                  await updateDoc(doc(db, 'users', profile.uid), { badges: updatedBadges });
+                }}
+                defaultValue=""
+              >
+                <option value="" disabled>تقديم على شارة أخرى</option>
+                {badgeSettings.categories.map(category => (
+                  <optgroup key={category.name} label={category.name}>
+                    {Array.isArray(category.badges) ? category.badges.map(badge => {
+                      const isSelected = [profile.badges.badge1.name, profile.badges.badge2.name, profile.badges.badge3.name].includes(badge);
+                      return (
+                        <option 
+                          key={badge} 
+                          value={badge} 
+                          disabled={isSelected}
+                          className={isSelected ? 'text-gray-400 font-medium' : 'text-gray-900'}
+                        >
+                          {badge}
+                        </option>
+                      );
+                    }) : null}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
