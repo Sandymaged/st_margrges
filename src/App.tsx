@@ -61,6 +61,8 @@ export default function App() {
           logoUrl: '/syncc.png'
         });
       }
+    }, (error) => {
+      console.warn("Failed to fetch general settings:", error);
     });
     return () => unsubscribe();
   }, []);

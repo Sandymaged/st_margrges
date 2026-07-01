@@ -26,7 +26,8 @@
           msg.includes('signal is aborted without reason') ||
           msg.includes('Failed to fetch') ||
           msg.includes('net::ERR_ABORTED') ||
-          msg.includes('net::ERR_CONNECTION_REFUSED')
+          msg.includes('net::ERR_CONNECTION_REFUSED') ||
+          msg.includes('Cannot set property fetch')
         );
       }
 
@@ -51,7 +52,8 @@
           msg.includes('The user aborted a request') ||
           msg.includes('signal is aborted without reason') ||
           msg.includes('Failed to fetch') ||
-          msg.includes('Error processing response text')
+          msg.includes('Error processing response text') ||
+          msg.includes('Cannot set property fetch')
         ) {
           event.preventDefault();
         }
@@ -63,7 +65,8 @@
           msg.includes('The user aborted a request') ||
           msg.includes('signal is aborted without reason') ||
           msg.includes('Failed to fetch') ||
-          msg.includes('Error processing response text')
+          msg.includes('Error processing response text') ||
+          msg.includes('Cannot set property fetch')
         ) {
           event.preventDefault();
         }

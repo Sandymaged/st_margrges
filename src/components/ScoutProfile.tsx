@@ -39,6 +39,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
           groupLinks: data.groupLinks || {}
         });
       }
+    }, (error) => {
+      console.warn("Failed to fetch badges settings:", error);
     });
 
     const unsubGeneral = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
@@ -52,6 +54,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
           attendanceDates: data.attendanceDates || []
         });
       }
+    }, (error) => {
+      console.warn("Failed to fetch general settings:", error);
     });
     
     return () => {
@@ -440,7 +444,27 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               isPassed={checkBadgePassStatus(profile.badges.badge3.name, profile.stage, profile.badges.badge3.completedRequirements || [], profile.badges.badge3.requirementScores || {})}
             />
           )}
-          {[profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].filter(b => b && b.name).length < 3 && (
+          {(() => {
+            const registeredBadges = [profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].filter(b => b && b.name);
+            const completedBadgesCount = registeredBadges.filter(b => {
+              const reqs = getScoutBadgeRequirements(b.name, profile.stage);
+              return reqs.length > 0 && b.completedRequirements?.length === reqs.length;
+            }).length;
+            
+            const canAddBadge = registeredBadges.length < 2 || (registeredBadges.length === 2 && completedBadgesCount >= 1);
+            
+            if (registeredBadges.length >= 3) return null;
+            
+            if (!canAddBadge) {
+              return (
+                <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-3xl p-6 bg-gray-50 text-center gap-2">
+                  <span className="text-gray-500 font-bold">لا يمكنك إضافة شارة ثالثة</span>
+                  <span className="text-sm text-gray-400">يجب عليك إكمال بنود إحدى الشارات الحالية أولاً (أن يتم تسليم جميع البنود)</span>
+                </div>
+              );
+            }
+            
+            return (
             <div className="flex items-center justify-center border-2 border-dashed border-gray-200 rounded-3xl p-6">
               <select
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-gray-700"
@@ -487,7 +511,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 )})}
               </select>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 

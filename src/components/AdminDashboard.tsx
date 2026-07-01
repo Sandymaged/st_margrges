@@ -378,6 +378,8 @@ enum OperationType {
           requirementCategories: {}
         });
       }
+    }, (error) => {
+      console.warn("Failed to fetch badges settings:", error);
     });
 
     const unsubscribeGeneralSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
@@ -393,6 +395,8 @@ enum OperationType {
           showResults: data.showResults || false
         });
       }
+    }, (error) => {
+      console.warn("Failed to fetch general settings:", error);
     });
 
     let unsubscribeLogs: any = null;
@@ -406,6 +410,8 @@ enum OperationType {
           return timeB - timeA;
         });
         setActivityLogs(logs);
+      }, (error) => {
+        console.warn('Activity logs listener error (might be expected if not fully granted superadmin in firestore):', error);
       });
 
       unsubscribeDeletedLogs = onSnapshot(query(collection(db, 'deleted_accounts_logs')), (snapshot) => {
@@ -416,6 +422,8 @@ enum OperationType {
           return timeB - timeA;
         });
         setDeletedAccountsLogs(logs);
+      }, (error) => {
+        console.warn('Deleted logs listener error (might be expected if not fully granted superadmin in firestore):', error);
       });
     }
 
@@ -1879,7 +1887,9 @@ enum OperationType {
       return;
     }
 
-    if (newPassword.length < 6) {
+    const trimmedPassword = newPassword.trim();
+
+    if (trimmedPassword.length < 6) {
       setMessage({ type: 'error', text: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
       return;
     }
@@ -1895,7 +1905,7 @@ enum OperationType {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           uid: changingPasswordFor.uid, 
-          newPassword, 
+          newPassword: trimmedPassword, 
           adminToken 
         })
       });

@@ -92,15 +92,14 @@ export default function Auth() {
   // Form fields
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [name, setName] = useState('');
   const [stage, setStage] = useState<Stage>(STAGES[0]);
   const [badge1, setBadge1] = useState('');
   const [badge2, setBadge2] = useState('');
-  const [badge3, setBadge3] = useState('');
   
   const [selectedCategory1, setSelectedCategory1] = useState('');
   const [selectedCategory2, setSelectedCategory2] = useState('');
-  const [selectedCategory3, setSelectedCategory3] = useState('');
   const [visibleBadges, setVisibleBadges] = useState<number>(1);
 
   useEffect(() => {
@@ -114,6 +113,8 @@ export default function Auth() {
           requirementCategories: data.requirementCategories || {}
         });
       }
+    }, (error) => {
+      console.warn("Failed to fetch badges settings:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -127,6 +128,8 @@ export default function Auth() {
           logoUrl: '/syncc.png'
         });
       }
+    }, (error) => {
+      console.warn("Failed to fetch general settings:", error);
     });
     return () => unsubscribe();
   }, []);
@@ -177,16 +180,7 @@ export default function Auth() {
     } else {
       setBadge2("");
     }
-    
-    if (selectedCategory3) {
-      const badges3 = getAvailableBadges(selectedCategory3, stage);
-      if (!badges3.includes(badge3)) {
-        setBadge3("");
-      }
-    } else {
-      setBadge3("");
-    }
-  }, [badgeSettings, stage, selectedCategory1, selectedCategory2, selectedCategory3]);
+  }, [badgeSettings, stage, selectedCategory1, selectedCategory2]);
 
   useEffect(() => {
     if (auth.currentUser) {
@@ -200,8 +194,23 @@ export default function Auth() {
     }
   }, []);
 
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (val.includes(' ')) {
+      setPasswordError('لا يمكن وضع مسافات في كلمة السر');
+      setPassword(val.replace(/\s/g, ''));
+    } else {
+      setPasswordError('');
+      setPassword(val);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (passwordError) {
+      setError('يرجى تصحيح الأخطاء قبل المتابعة');
+      return;
+    }
     setError('');
     setLoading(true);
 
@@ -225,6 +234,8 @@ export default function Auth() {
         throw new Error('لأسباب أمنية، غير مسموح باستخدام أسماء تحتوي على أي رموز مثل * < #');
       }
 
+      const trimmedPassword = password.trim();
+
       if (!isLogin) {
         if (!/^[\u0600-\u06FFa-zA-Z0-9\s]+$/.test(name.trim())) {
           throw new Error('الاسم يجب أن يحتوي على حروف عربية أو إنجليزية وأرقام ومسافات فقط، ولا يسمح بالرموز الخاصة.');
@@ -238,12 +249,11 @@ export default function Auth() {
       const fakeEmail = `${phone}@scouts.local`;
 
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, fakeEmail, password);
+        await signInWithEmailAndPassword(auth, fakeEmail, trimmedPassword);
       } else {
         // Sign Up or Complete Profile Flow
         const selectedBadges = [badge1];
         if (visibleBadges >= 2 && badge2) selectedBadges.push(badge2);
-        if (visibleBadges >= 3 && badge3) selectedBadges.push(badge3);
 
         const uniqueBadges = new Set(selectedBadges);
         if (uniqueBadges.size !== selectedBadges.length) {
@@ -255,7 +265,7 @@ export default function Auth() {
           user = auth.currentUser;
         } else {
           // Create User in Auth
-          const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
+          const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, trimmedPassword);
           user = userCredential.user;
         }
 
@@ -269,7 +279,7 @@ export default function Auth() {
           badges: {
             badge1: { name: badge1, progress: 0, notes: '', completedRequirements: [] },
             badge2: { name: visibleBadges >= 2 ? badge2 : '', progress: 0, notes: '', completedRequirements: [] },
-            badge3: { name: visibleBadges >= 3 ? badge3 : '', progress: 0, notes: '', completedRequirements: [] },
+            badge3: { name: '', progress: 0, notes: '', completedRequirements: [] },
           },
           role: 'scout',
           isVerified: true, // Set to true by default
@@ -377,11 +387,12 @@ export default function Auth() {
                     required
                     type="password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={handlePasswordChange}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
                     placeholder="••••••••"
                     minLength={6}
                   />
+                  {passwordError && <p className="text-xs text-red-600 font-bold mt-1">{passwordError}</p>}
                 </div>
               </>
             ) : (
@@ -428,11 +439,12 @@ export default function Auth() {
                       required
                       type="password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={handlePasswordChange}
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none transition-all"
                       placeholder="••••••••"
                       minLength={6}
                     />
+                    {passwordError && <p className="text-xs text-red-600 font-bold mt-1">{passwordError}</p>}
                   </div>
                 )}
 
@@ -459,7 +471,7 @@ export default function Auth() {
                 <div className="md:col-span-2 space-y-6 pt-4 border-t">
                   <div className="flex justify-between items-center">
                     <h4 className="text-sm font-black text-gray-700">اختر شاراتك:</h4>
-                    {visibleBadges < 3 && (
+                    {visibleBadges < 2 && (
                       <button
                         type="button"
                         onClick={() => setVisibleBadges(prev => prev + 1)}
@@ -500,7 +512,7 @@ export default function Auth() {
                           required
                         >
                           <option value="">-- اختر شارة --</option>
-                          {selectedCategory1 && getAvailableBadges(selectedCategory1, stage).map(b => <option key={b} value={b} disabled={b === badge2 || b === badge3}>{b}</option>)}
+                          {selectedCategory1 && getAvailableBadges(selectedCategory1, stage).map(b => <option key={b} value={b} disabled={b === badge2}>{b}</option>)}
                         </select>
                       </div>
                     </div>
@@ -546,52 +558,7 @@ export default function Auth() {
                             disabled={!selectedCategory2}
                           >
                             <option value="">-- اختر شارة --</option>
-                            {selectedCategory2 && getAvailableBadges(selectedCategory2, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge3}>{b}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Badge 3 */}
-                    {visibleBadges >= 3 && (
-                      <div className="space-y-3 relative p-4 md:p-0 bg-gray-50 md:bg-transparent rounded-xl border md:border-none border-gray-100">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setVisibleBadges(2);
-                            setBadge3('');
-                            setSelectedCategory3('');
-                          }}
-                          className="absolute -top-2 -left-2 md:-top-2 md:-left-2 bg-red-100 text-red-600 rounded-full p-1.5 hover:bg-red-200 transition-colors z-10 shadow-sm"
-                          title="حذف الشارة"
-                        >
-                          <X size={14} />
-                        </button>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-gray-400 uppercase">تصنيف شارة 3</label>
-                          <select
-                            value={selectedCategory3}
-                            onChange={(e) => setSelectedCategory3(e.target.value)}
-                            className="w-full px-3 py-2 rounded-xl border border-gray-200 outline-none bg-white md:bg-gray-50 text-xs font-bold"
-                            required={visibleBadges >= 3}
-                          >
-                            <option value="">-- اختر تصنيف --</option>
-                            {(badgeSettings.categories || [])
-                              .filter(c => getAvailableBadges(c.id, stage).length > 0)
-                              .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-gray-700">شارة 3</label>
-                          <select
-                            value={badge3}
-                            onChange={(e) => setBadge3(e.target.value)}
-                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none bg-white font-bold text-gray-700 text-sm shadow-sm disabled:bg-gray-50"
-                            required={visibleBadges >= 3}
-                            disabled={!selectedCategory3}
-                          >
-                            <option value="">-- اختر شارة --</option>
-                            {selectedCategory3 && getAvailableBadges(selectedCategory3, stage).map(b => <option key={b} value={b} disabled={b === badge1 || b === badge2}>{b}</option>)}
+                            {selectedCategory2 && getAvailableBadges(selectedCategory2, stage).map(b => <option key={b} value={b} disabled={b === badge1}>{b}</option>)}
                           </select>
                         </div>
                       </div>
@@ -604,7 +571,7 @@ export default function Auth() {
 
           <div className="space-y-4">
             <button
-              disabled={loading || (!isLogin && (!badge1 || (visibleBadges >= 2 && !badge2) || (visibleBadges >= 3 && !badge3)))}
+              disabled={loading || (!isLogin && (!badge1 || (visibleBadges >= 2 && !badge2)))}
               type="submit"
               className="w-full flex items-center justify-center gap-3 bg-[#4285F4] hover:bg-[#357ABD] text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
             >
@@ -622,9 +589,8 @@ export default function Auth() {
               <button
                 type="button"
                 onClick={() => {
-                  const adminNumber = import.meta.env.VITE_SUPER_ADMIN_PHONE || '20000000000'; // Default placeholder
                   const message = `أهلاً، أنا عضو في الكشافة ونسيت كلمة المرور الخاصة بي. رقم هاتفي هو: ${phone}`;
-                  window.open(`https://wa.me/2${adminNumber}?text=${encodeURIComponent(message)}`, '_blank');
+                  window.open(`https://t.me/ScoutHelp38?text=${encodeURIComponent(message)}`, '_blank');
                 }}
                 className="w-full py-2 text-gray-500 font-bold hover:text-[#4285F4] transition-all text-sm"
               >
