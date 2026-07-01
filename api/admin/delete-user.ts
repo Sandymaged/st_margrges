@@ -51,17 +51,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
     const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
     
-    const isSuperAdmin = 
+    let isSuperAdmin = 
       (superAdminEmail && decodedToken.email === superAdminEmail) || 
       (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
       (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
 
+    let canDeleteAccounts = isSuperAdmin;
+
     if (!isSuperAdmin) {
-      // If not super admin, check if they are at least an admin in Firestore
       const adminDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-      if (!adminDoc.exists || adminDoc.data()?.role !== 'admin') {
-        return res.status(403).json({ error: 'Forbidden: Admin access required.' });
+      if (adminDoc.exists) {
+        const data = adminDoc.data();
+        if (data?.permissions?.canManagePermissions) {
+          isSuperAdmin = true;
+          canDeleteAccounts = true;
+        } else if (data?.permissions?.canDeleteAccounts) {
+          canDeleteAccounts = true;
+        }
       }
+    }
+
+    if (!canDeleteAccounts) {
+      return res.status(403).json({ error: 'Forbidden: Admin access with delete permissions required.' });
     }
 
     let userToDeleteUid = uid;

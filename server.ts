@@ -188,11 +188,18 @@ async function startServer() {
       const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
       const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
       
-      const isSuperAdmin = 
+      let isSuperAdmin = 
         (superAdminEmail && decodedToken.email === superAdminEmail) || 
         (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
         (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
       
+      if (!isSuperAdmin) {
+        const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
+        if (requesterDoc.exists && requesterDoc.data()?.permissions?.canManagePermissions) {
+          isSuperAdmin = true;
+        }
+      }
+
       if (!isSuperAdmin) {
         return res.status(403).json({ error: "Unauthorized. Only super admins can change phone numbers." });
       }
@@ -231,11 +238,18 @@ async function startServer() {
       const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
       const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
       
-      const isSuperAdmin = 
+      let isSuperAdmin = 
         (superAdminEmail && decodedToken.email === superAdminEmail) || 
         (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
         (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
       
+      if (!isSuperAdmin) {
+        const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
+        if (requesterDoc.exists && requesterDoc.data()?.permissions?.canManagePermissions) {
+          isSuperAdmin = true;
+        }
+      }
+
       if (!isSuperAdmin) {
         return res.status(403).json({ error: "Unauthorized. Only super admins can change passwords." });
       }
