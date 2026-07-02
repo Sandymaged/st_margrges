@@ -62,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const adminDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
       if (adminDoc.exists) {
         const data = adminDoc.data();
-        if (data?.permissions?.canManagePermissions) {
+        if (data?.permissions?.canManagePermissions || data?.role === 'admin') {
           isSuperAdmin = true;
           canDeleteAccounts = true;
         } else if (data?.permissions?.canDeleteAccounts) {

@@ -102,7 +102,7 @@ async function startServer() {
         const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
         if (requesterDoc.exists) {
           const data = requesterDoc.data();
-          if (data?.role === 'admin' && data?.permissions?.canDeleteAccounts) {
+          if (data?.role === 'admin') {
             canDelete = true;
           }
         }
@@ -195,7 +195,7 @@ async function startServer() {
       
       if (!isSuperAdmin) {
         const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-        if (requesterDoc.exists && requesterDoc.data()?.permissions?.canManagePermissions) {
+        if (requesterDoc.exists && (requesterDoc.data()?.permissions?.canManagePermissions || requesterDoc.data()?.role === 'admin')) {
           isSuperAdmin = true;
         }
       }
@@ -245,7 +245,7 @@ async function startServer() {
       
       if (!isSuperAdmin) {
         const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-        if (requesterDoc.exists && requesterDoc.data()?.permissions?.canManagePermissions) {
+        if (requesterDoc.exists && (requesterDoc.data()?.permissions?.canManagePermissions || requesterDoc.data()?.role === 'admin')) {
           isSuperAdmin = true;
         }
       }

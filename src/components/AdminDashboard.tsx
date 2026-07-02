@@ -1156,12 +1156,19 @@ enum OperationType {
               })
             });
             if (!response.ok) {
-              const errData = await response.json();
-              console.error('Failed to update phone in Auth:', errData);
-              if (errData.error && errData.error.includes('email-already-exists')) {
-                throw new Error('رقم الهاتف هذا مسجل لحساب آخر بالفعل');
+              let errorMsg = 'فشل تحديث رقم الهاتف في نظام الدخول';
+              try {
+                const errData = await response.json();
+                console.error('Failed to update phone in Auth:', errData);
+                if (errData.error && typeof errData.error === 'string' && errData.error.includes('email-already-exists')) {
+                  throw new Error('رقم الهاتف هذا مسجل لحساب آخر بالفعل');
+                }
+                errorMsg = typeof errData.error === 'string' ? errData.error : (errData.error?.message || errData.message || response.statusText);
+              } catch (e: any) {
+                if (e.message === 'رقم الهاتف هذا مسجل لحساب آخر بالفعل') throw e;
+                errorMsg = await response.text() || response.statusText;
               }
-              throw new Error(errData.error || 'فشل تحديث رقم الهاتف في نظام الدخول');
+              throw new Error(errorMsg);
             }
           }
         }
@@ -1911,8 +1918,14 @@ enum OperationType {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to update password');
+        let errorMsg = 'Failed to update password';
+        try {
+          const errorData = await response.json();
+          errorMsg = typeof errorData.error === 'string' ? errorData.error : (errorData.error?.message || errorData.message || response.statusText);
+        } catch (e) {
+          errorMsg = await response.text() || response.statusText;
+        }
+        throw new Error(errorMsg);
       }
 
       setMessage({ type: 'success', text: 'تم تحديث كلمة المرور بنجاح' });
