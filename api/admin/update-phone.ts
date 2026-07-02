@@ -34,10 +34,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error("Failed to parse req.body:", e);
       }
     }
-    const { uid, newPassword, adminToken } = body;
+    const { uid, newPhone, adminToken } = body;
 
-    if (!uid || !newPassword) {
-      return res.status(400).json({ error: "UID and newPassword are required." });
+    if (!uid || !newPhone) {
+      return res.status(400).json({ error: "UID and newPhone are required." });
     }
 
     // Verify the requester is an admin
@@ -60,17 +60,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!isSuperAdmin) {
-      return res.status(403).json({ error: "Unauthorized. Only super admins can change passwords." });
+      return res.status(403).json({ error: "Unauthorized. Only super admins can change phone numbers." });
     }
 
+    const fakeEmail = `${newPhone}@scouts.local`;
     await admin.auth().updateUser(uid, {
-      password: newPassword
+      email: fakeEmail
     });
 
-    return res.status(200).json({ message: "Successfully updated user password." });
+    return res.status(200).json({ message: "Successfully updated user phone (email)." });
 
   } catch (error: any) {
-    console.error("Error updating password:", error);
-    return res.status(500).json({ error: error.message || "Failed to update password." });
+    console.error("Error updating phone:", error);
+    return res.status(500).json({ error: error.message || "Failed to update phone." });
   }
 }
