@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ScoutProfile, BadgeSettings, GeneralSettings } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
-import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle, Award, Trash2 } from 'lucide-react';
+import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle, Award, Trash2, Smartphone, X, Share2, MoreVertical, PlusSquare, Info } from 'lucide-react';
 import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
@@ -25,7 +25,60 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
   const [cancelBadgeConfirm, setCancelBadgeConfirm] = useState<{key: 'badge1' | 'badge2' | 'badge3', name: string} | null>(null);
   const [isCancelChecked, setIsCancelChecked] = useState(false);
   
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState<boolean>(false);
+  const [showInstallGuide, setShowInstallGuide] = useState<boolean>(false);
+  const [guidePlatform, setGuidePlatform] = useState<'android' | 'ios'>('android');
+  
   const qrRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const isDismissed = localStorage.getItem('dismissedInstallBanner');
+    
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      if (!isDismissed) {
+        setShowInstallBanner(true);
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    
+    // Always show in development or if it's mobile + not standalone + not dismissed
+    if (isMobile && !isStandalone && !isDismissed) {
+      setShowInstallBanner(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`User response to install prompt: ${outcome}`);
+        setDeferredPrompt(null);
+        setShowInstallBanner(false);
+      } catch (err) {
+        console.error("Install prompt error:", err);
+        setShowInstallGuide(true);
+      }
+    } else {
+      setShowInstallGuide(true);
+    }
+  };
+
+  const handleDismissInstallBanner = () => {
+    localStorage.setItem('dismissedInstallBanner', 'true');
+    setShowInstallBanner(false);
+  };
 
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
@@ -269,6 +322,188 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
 
   return (
     <div className="space-y-8">
+      {/* App Install Alert Banner */}
+      <AnimatePresence>
+        {showInstallBanner && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, y: -20 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -20 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 text-white p-6 rounded-3xl shadow-lg border border-white/10 relative flex flex-col md:flex-row items-center justify-between gap-6" dir="rtl">
+              <button 
+                onClick={handleDismissInstallBanner}
+                className="absolute top-4 left-4 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 p-1.5 rounded-full transition-all"
+                title="إغلاق"
+              >
+                <X size={16} />
+              </button>
+              
+              <div className="flex items-center gap-4 text-right">
+                <div className="p-4 bg-white/10 rounded-2xl text-white shadow-inner flex-shrink-0">
+                  <Smartphone size={32} className="animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-xl font-black mb-1">تنزيل التطبيق على هاتفك 📱</h4>
+                  <p className="text-sm text-blue-50 font-bold max-w-xl">
+                    تقدر تنزل موقع مجموعة مارجرجس الكشفية وتستخدمه كأبلكيشن سريع ومباشر على موبايلك عشان تتابع شاراتك وحضورك بسهولة ومن غير ما تفتح المتصفح كل مرة!
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex flex-wrap gap-3 w-full md:w-auto justify-end">
+                <button
+                  onClick={handleInstallApp}
+                  className="px-6 py-3 bg-white text-indigo-600 font-black rounded-xl hover:bg-indigo-50 active:scale-[0.98] transition-all flex items-center gap-2 text-sm shadow-sm"
+                >
+                  <Download size={16} />
+                  <span>تنزيل التطبيق الآن</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowInstallGuide(true);
+                  }}
+                  className="px-5 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center gap-2 text-sm border border-white/20"
+                >
+                  <Info size={16} />
+                  <span>طريقة التثبيت يدوياً</span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Install Guide Modal */}
+      {showInstallGuide && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" dir="rtl">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 border border-gray-100 text-right">
+            <button
+              onClick={() => setShowInstallGuide(false)}
+              className="absolute top-4 left-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <X size={20} />
+            </button>
+            
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-blue-50 text-[#4285F4] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Smartphone size={32} />
+              </div>
+              <h3 className="text-2xl font-black text-gray-900 mb-2">كيفية تثبيت التطبيق</h3>
+              <p className="text-gray-500 font-bold text-sm">خطوات بسيطة لإضافة الموقع كشاشة رئيسية على هاتفك</p>
+            </div>
+            
+            {/* Tabs */}
+            <div className="flex border-b border-gray-100 mb-6 bg-gray-50 p-1.5 rounded-2xl">
+              <button
+                onClick={() => setGuidePlatform('android')}
+                className={`flex-1 py-3 text-center font-black rounded-xl text-sm transition-all ${
+                  guidePlatform === 'android' 
+                    ? 'bg-white text-[#4285F4] shadow-sm' 
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                موبايل أندرويد (Chrome)
+              </button>
+              <button
+                onClick={() => setGuidePlatform('ios')}
+                className={`flex-1 py-3 text-center font-black rounded-xl text-sm transition-all ${
+                  guidePlatform === 'ios' 
+                    ? 'bg-white text-[#4285F4] shadow-sm' 
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                آيفون وآيباد (Safari)
+              </button>
+            </div>
+
+            {/* Android Instructions */}
+            {guidePlatform === 'android' ? (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-sm flex-shrink-0">
+                    ١
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-800 text-base mb-1">افتح المتصفح</h4>
+                    <p className="text-sm text-gray-500 font-medium">تأكد أنك تفتح الموقع باستخدام متصفح <span className="font-bold text-gray-700">جوجل كروم (Chrome)</span>.</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-sm flex-shrink-0">
+                    ٢
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-800 text-base mb-1">اضغط على القائمة</h4>
+                    <p className="text-sm text-gray-500 font-medium flex items-center gap-1.5 flex-wrap">
+                      اضغط على زر النقاط الثلاثة المجاورة لعنوان الموقع <span className="bg-white px-2 py-1 rounded border border-gray-200 text-gray-700 flex items-center justify-center"><MoreVertical size={14} /></span> في أعلى أو أسفل الشاشة.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-sm flex-shrink-0">
+                    ٣
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-800 text-base mb-1">تثبيت التطبيق</h4>
+                    <p className="text-sm text-gray-500 font-medium flex items-center gap-1.5 flex-wrap">
+                      اختر <span className="font-bold text-gray-800">"تثبيت التطبيق" (Install App)</span> أو <span className="font-bold text-gray-800">"إضافة إلى الشاشة الرئيسية"</span> من القائمة.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // iOS Instructions
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-sm flex-shrink-0">
+                    ١
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-800 text-base mb-1">افتح متصفح Safari</h4>
+                    <p className="text-sm text-gray-500 font-medium">افتح الموقع باستخدام متصفح <span className="font-bold text-gray-700">سافاري الرسمي (Safari)</span> على جهاز الآيفون الخاص بك.</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-sm flex-shrink-0">
+                    ٢
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-800 text-base mb-1">اضغط على زر المشاركة</h4>
+                    <p className="text-sm text-gray-500 font-medium flex items-center gap-1.5 flex-wrap">
+                      اضغط على زر <span className="font-bold text-gray-800">المشاركة (Share)</span> الموجود في شريط الأدوات بالأسفل <span className="bg-white p-1 rounded border border-gray-200 text-gray-700"><Share2 size={14} className="inline" /></span>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-sm flex-shrink-0">
+                    ٣
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-800 text-base mb-1">إضافة للشاشة الرئيسية</h4>
+                    <p className="text-sm text-gray-500 font-medium flex items-center gap-1.5 flex-wrap">
+                      مرر للأسفل واختر <span className="font-bold text-gray-800">"إضافة إلى الشاشة الرئيسية" (Add to Home Screen)</span> <span className="bg-white p-1 rounded border border-gray-200 text-gray-700"><PlusSquare size={14} className="inline" /></span> ثم اضغط "إضافة".
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowInstallGuide(false)}
+              className="w-full mt-6 bg-[#4285F4] hover:bg-blue-600 text-white font-black py-4 rounded-2xl transition-all shadow-md shadow-blue-100"
+            >
+              تم، شكراً لك!
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Welcome Groups Modal */}
       <AnimatePresence>
         {profile.showWelcomeGroups && (
@@ -360,7 +595,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
 
           <div className="hidden md:flex flex-col items-center gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
             <QRCodeSVG value={profile.uid} size={150} level="H" includeMargin={false} />
-            <div className="flex flex-col items-center gap-2">
+            <div className="flex flex-col items-center gap-2 w-full">
               <span className="text-xs text-gray-500 font-bold">كود الحضور</span>
               <button 
                 onClick={handleDownloadQR}
@@ -368,6 +603,13 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
               >
                 <Download size={14} />
                 تحميل الكود
+              </button>
+              <button 
+                onClick={() => setShowInstallGuide(true)}
+                className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-lg hover:bg-indigo-100 transition-colors w-full"
+              >
+                <Smartphone size={14} />
+                تثبيت كـتطبيق
               </button>
             </div>
           </div>
@@ -384,6 +626,13 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
             >
               <Download size={18} />
               تحميل صورة الكود
+            </button>
+            <button 
+              onClick={() => setShowInstallGuide(true)}
+              className="flex items-center justify-center gap-2 px-4 py-3 w-full max-w-[200px] bg-indigo-50 text-indigo-600 text-sm font-bold rounded-xl hover:bg-indigo-100 transition-colors shadow-sm"
+            >
+              <Smartphone size={18} />
+              تثبيت كـتطبيق
             </button>
           </div>
         </div>

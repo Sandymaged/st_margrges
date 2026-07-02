@@ -2,7 +2,6 @@ import admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
-import firebaseConfig from '../../../firebase-applet-config.json';
 
 /**
  * Aggressively searches for a service account key in environment variables or local files.
@@ -97,10 +96,25 @@ export function initAdmin() {
   };
 }
 
+const DEFAULT_FIRESTORE_DATABASE_ID = 'ai-studio-a3d5d0b4-314f-478c-a9b4-cb05e7fa0221';
+
+function resolveFirestoreDatabaseId(): string {
+  try {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (parsed && parsed.firestoreDatabaseId) return parsed.firestoreDatabaseId;
+    }
+  } catch (e) {
+    console.error('Could not read firebase-applet-config.json, falling back:', e);
+  }
+  return DEFAULT_FIRESTORE_DATABASE_ID;
+}
+
 let dbInstance: Firestore | null = null;
 export function getDb(): Firestore {
   if (!dbInstance) {
-    dbInstance = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+    dbInstance = getFirestore(admin.app(), resolveFirestoreDatabaseId());
   }
   return dbInstance;
 }

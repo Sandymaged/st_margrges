@@ -1158,15 +1158,21 @@ enum OperationType {
             if (!response.ok) {
               let errorMsg = 'فشل تحديث رقم الهاتف في نظام الدخول';
               try {
-                const errData = await response.json();
-                console.error('Failed to update phone in Auth:', errData);
-                if (errData.error && typeof errData.error === 'string' && errData.error.includes('email-already-exists')) {
-                  throw new Error('رقم الهاتف هذا مسجل لحساب آخر بالفعل');
+                const rawText = await response.text();
+                try {
+                  const errData = JSON.parse(rawText);
+                  console.error('Failed to update phone in Auth:', errData);
+                  if (errData.error && typeof errData.error === 'string' && errData.error.includes('email-already-exists')) {
+                    throw new Error('رقم الهاتف هذا مسجل لحساب آخر بالفعل');
+                  }
+                  errorMsg = typeof errData.error === 'string' ? errData.error : (errData.error?.message || errData.message || response.statusText);
+                } catch (e: any) {
+                  if (e.message === 'رقم الهاتف هذا مسجل لحساب آخر بالفعل') throw e;
+                  errorMsg = rawText || response.statusText;
                 }
-                errorMsg = typeof errData.error === 'string' ? errData.error : (errData.error?.message || errData.message || response.statusText);
               } catch (e: any) {
                 if (e.message === 'رقم الهاتف هذا مسجل لحساب آخر بالفعل') throw e;
-                errorMsg = await response.text() || response.statusText;
+                errorMsg = response.statusText;
               }
               throw new Error(errorMsg);
             }
@@ -1920,10 +1926,15 @@ enum OperationType {
       if (!response.ok) {
         let errorMsg = 'Failed to update password';
         try {
-          const errorData = await response.json();
-          errorMsg = typeof errorData.error === 'string' ? errorData.error : (errorData.error?.message || errorData.message || response.statusText);
+          const rawText = await response.text();
+          try {
+            const errorData = JSON.parse(rawText);
+            errorMsg = typeof errorData.error === 'string' ? errorData.error : (errorData.error?.message || errorData.message || response.statusText);
+          } catch (e) {
+            errorMsg = rawText || response.statusText;
+          }
         } catch (e) {
-          errorMsg = await response.text() || response.statusText;
+          errorMsg = response.statusText;
         }
         throw new Error(errorMsg);
       }
