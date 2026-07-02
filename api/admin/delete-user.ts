@@ -1,5 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { initAdmin, admin } from './lib/admin.js';
+import { initAdmin, admin, getDb } from './lib/admin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const status = initAdmin();
@@ -59,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let canDeleteAccounts = isSuperAdmin;
 
     if (!isSuperAdmin) {
-      const adminDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
+      const adminDoc = await getDb().collection('users').doc(decodedToken.uid).get();
       if (adminDoc.exists) {
         const data = adminDoc.data();
         if (data?.permissions?.canManagePermissions || data?.role === 'admin') {
@@ -108,14 +108,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Delete from Firestore
     // We try to delete by UID first, if not available, we delete by querying phone
     if (userToDeleteUid) {
-      await admin.firestore().collection('users').doc(userToDeleteUid).delete();
+      await getDb().collection('users').doc(userToDeleteUid).delete();
       console.log(`Successfully deleted user from Firestore: ${userToDeleteUid}`);
     } else if (phone) {
-      const usersRef = admin.firestore().collection('users');
+      const usersRef = getDb().collection('users');
       const snapshot = await usersRef.where('number', '==', phone).get();
       
       if (!snapshot.empty) {
-        const batch = admin.firestore().batch();
+        const batch = getDb().batch();
         snapshot.docs.forEach((doc) => {
           batch.delete(doc.ref);
         });

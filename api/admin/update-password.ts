@@ -1,5 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { initAdmin, admin } from './lib/admin.js';
+import { initAdmin, admin, getDb } from './lib/admin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const status = initAdmin();
@@ -53,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
     
     if (!isSuperAdmin) {
-      const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
+      const requesterDoc = await getDb().collection('users').doc(decodedToken.uid).get();
       if (requesterDoc.exists && (requesterDoc.data()?.permissions?.canManagePermissions || requesterDoc.data()?.role === 'admin')) {
         isSuperAdmin = true;
       }

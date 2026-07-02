@@ -1,6 +1,8 @@
 import admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import firebaseConfig from '../../../firebase-applet-config.json';
 
 /**
  * Aggressively searches for a service account key in environment variables or local files.
@@ -93,6 +95,14 @@ export function initAdmin() {
     envSet: !!findServiceAccountKey(),
     error: initError
   };
+}
+
+let dbInstance: Firestore | null = null;
+export function getDb(): Firestore {
+  if (!dbInstance) {
+    dbInstance = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+  }
+  return dbInstance;
 }
 
 export { admin };
