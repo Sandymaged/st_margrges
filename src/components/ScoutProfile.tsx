@@ -68,12 +68,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
         console.error("Install prompt error:", err);
       }
     } else {
-      const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      if (isiOS) {
-        alert('لتنزيل التطبيق وتثبيته على هاتف iPhone أو iPad:\n\n١. اضغط على زر "مشاركة" (Share 📤) في متصفح Safari.\n٢. مرر للأسفل واختر "إضافة إلى الشاشة الرئيسية" (Add to Home Screen ➕).\n٣. اضغط على "إضافة" (Add) في الزاوية العلوية.');
-      } else {
-        alert('لتنزيل التطبيق على هاتفك:\n\nاضغط على زر القائمة في المتصفح (النقاط الثلاثة ⠇) ثم اختر "تثبيت التطبيق" أو "إضافة إلى الشاشة الرئيسية".');
-      }
+      setShowInstallBanner(false);
     }
   };
 
@@ -324,47 +319,52 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
 
   return (
     <div className="space-y-8">
-      {/* App Install Alert Banner */}
+      {/* App Install Overlay Modal */}
       <AnimatePresence>
         {showInstallBanner && (
-          <motion.div
-            initial={{ opacity: 0, height: 0, y: -20 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -20 }}
-            className="overflow-hidden"
-          >
-            <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 text-white p-6 rounded-3xl shadow-lg border border-white/10 relative flex flex-col md:flex-row items-center justify-between gap-6" dir="rtl">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden border border-gray-100 p-8 text-center relative flex flex-col items-center gap-6"
+            >
               <button 
                 onClick={handleDismissInstallBanner}
-                className="absolute top-4 left-4 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 p-1.5 rounded-full transition-all"
+                className="absolute top-5 left-5 text-gray-400 hover:text-gray-600 bg-gray-50 hover:bg-gray-100 p-2 rounded-full transition-all"
                 title="إغلاق"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
               
-              <div className="flex items-center gap-4 text-right">
-                <div className="p-4 bg-white/10 rounded-2xl text-white shadow-inner flex-shrink-0">
-                  <Smartphone size={32} className="animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="text-xl font-black mb-1">تنزيل التطبيق على هاتفك 📱</h4>
-                  <p className="text-sm text-blue-50 font-bold max-w-xl">
-                    تقدر تنزل موقع مجموعة مارجرجس الكشفية وتستخدمه كأبلكيشن سريع ومباشر على موبايلك عشان تتابع شاراتك وحضورك بسهولة ومن غير ما تفتح المتصفح كل مرة!
-                  </p>
-                </div>
+              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center shadow-inner mt-4 animate-bounce">
+                <Smartphone size={40} />
               </div>
               
-              <div className="flex flex-wrap gap-3 w-full md:w-auto justify-end">
+              <div className="space-y-2">
+                <h4 className="text-2xl font-black text-gray-900">تثبيت التطبيق على الهاتف 📱</h4>
+                <p className="text-sm text-gray-500 font-bold leading-relaxed max-w-xs mx-auto">
+                  قم بتثبيت تطبيق مجموعة مارجرجس الكشفية للوصول السريع والمباشر لمتابعة شاراتك وتحديث حضورك في أي وقت بسهولة دون الحاجة لفتح المتصفح!
+                </p>
+              </div>
+              
+              <div className="flex flex-col gap-2.5 w-full mt-2">
                 <button
                   onClick={handleInstallApp}
-                  className="px-6 py-3 bg-white text-indigo-600 font-black rounded-xl hover:bg-indigo-50 active:scale-[0.98] transition-all flex items-center gap-2 text-sm shadow-sm"
+                  className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black rounded-2xl hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-base shadow-lg shadow-indigo-100"
                 >
-                  <Download size={16} />
-                  <span>تنزيل التطبيق الآن</span>
+                  <Download size={18} />
+                  <span>تثبيت التطبيق الآن</span>
+                </button>
+                <button
+                  onClick={handleDismissInstallBanner}
+                  className="w-full py-3.5 bg-gray-50 hover:bg-gray-100 text-gray-500 font-bold rounded-2xl active:scale-[0.98] transition-all text-sm"
+                >
+                  لاحقاً
                 </button>
               </div>
-            </div>
-          </motion.div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
