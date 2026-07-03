@@ -295,13 +295,39 @@ enum OperationType {
     const matchesStage = !hasManagedStages || (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scoutStage || ''));
     const matchesBadge = !hasManagedBadges || (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(badgeName || ''));
     
+    // Check if the badge belongs to a category that has this stage, or specifically belongs to this stage
+    const badgeCategory = badgeSettings.categories.find(c => {
+      const inGeneral = (c.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || ''));
+      const inSpecific = Object.values(c.stageBadges || {}).some(stageList => (stageList || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || '')));
+      return inGeneral || inSpecific;
+    });
+
+    const badgeBelongsToStage = badgeCategory ? (
+      // If it's a specific stage badge
+      Object.entries(badgeCategory.stageBadges || {}).some(([stage, list]) => 
+        normalizeArabic(stage) === normalizeArabic(scoutStage || '') && (list || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || ''))
+      ) ||
+      // Or if it's a general badge and the category is available for this stage (we check if any stage is defined for this category. If none, it's global. If some, must match)
+      ((badgeCategory.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || '')) &&
+        (Object.keys(badgeCategory.stageBadges || {}).length === 0 || 
+         Object.keys(badgeCategory.stageBadges || {}).some(s => normalizeArabic(s) === normalizeArabic(scoutStage || ''))))
+    ) : false;
+
     // If both are provided, they must both match (User's request for "registered for these same things")
     if (hasManagedStages && hasManagedBadges) {
-      return matchesStage && matchesBadge;
+      return matchesStage && matchesBadge && badgeBelongsToStage;
     }
     
     // If only one is provided, that one must match (the other is true by default)
-    return matchesStage && matchesBadge;
+    if (hasManagedBadges) {
+      return matchesBadge; // If they manage the badge, they can manage it for anyone
+    }
+    
+    if (hasManagedStages) {
+      return matchesStage && badgeBelongsToStage; // If they manage the stage, they can only manage badges that belong to this stage
+    }
+
+    return false;
   };
   
   const canEditScout = (scout: ScoutProfile) => {
@@ -2375,50 +2401,9 @@ enum OperationType {
                     .filter(badgeName => {
                       if (isSuperAdmin || canManageAllBadges) return true;
                       if (!currentProfile?.permissions?.canManageBadgeRequirements) return false;
-                      const { managedBadges, managedStages } = currentProfile.permissions || {};
                       
-                      const hasManagedStages = (managedStages || []).length > 0;
-                      const hasManagedBadges = (managedBadges || []).length > 0;
-                      
-                      const normCurrentBadge = normalizeArabic(badgeName as string);
-
-                      // 1. If no explicit permissions at all, deny access
-                      if (!hasManagedStages && !hasManagedBadges) return false;
-
-                      // 2. If specific badges are managed, this badge MUST be one of them
-                      if (hasManagedBadges) {
-                        const matchesExplicitBadge = (managedBadges || []).some(mb => normalizeArabic(mb) === normCurrentBadge);
-                        if (!matchesExplicitBadge) return false;
-                      }
-
-                      // 3. If specific stages are managed, the badge must belong to at least one of those managed stages 
-                      // (or be a general badge in a category that contains those stages)
-                      if (hasManagedStages) {
-                        const isBadgeInManagedStage = (badgeSettings.categories || []).some(cat => {
-                          // Check stage-specific badges
-                          const inSpecificStage = Object.entries(cat.stageBadges || {}).some(([stage, stageBadges]) => {
-                            const isManagedStage = (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(stage));
-                            return isManagedStage && (stageBadges as string[] || []).some(sb => normalizeArabic(sb) === normCurrentBadge);
-                          });
-                          if (inSpecificStage) return true;
-
-                          // Check general badges for a category that relevant to the managed stages
-                          const isGeneralToCategory = (cat.badges || []).some(cb => normalizeArabic(cb) === normCurrentBadge);
-                          const categoryHasManagedStage = Object.keys(cat.stageBadges || {}).some(stage => 
-                            (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(stage))
-                          );
-                          return isGeneralToCategory && categoryHasManagedStage;
-                        });
-                        
-                        // If it doesn't match any managed stage criteria, it's only allowed if it was explicitly managed in step 2
-                        // BUT if we want stages to be a mandatory filter too, we return false here.
-                        // Usually, stage management is about WHICH scouts you can see, 
-                        // while badge management is about WHICH badges you can edit.
-                        // For the dropdown, we'll allow it if explicitly in managedBadges OR in managedStages.
-                        if (!isBadgeInManagedStage && !hasManagedBadges) return false;
-                      }
-
-                      return true;
+                      // Check if the admin can edit this badge in ANY stage
+                      return STAGES.some(stage => canEditBadge(stage, badgeName as string));
                     })
                     .map(b => (
                       <option key={b} value={b}>{b}</option>
@@ -3551,40 +3536,9 @@ enum OperationType {
                   .filter(badgeName => {
                     if (isSuperAdmin || canManageAllBadges) return true;
                     if (!currentProfile?.permissions) return false;
-                    const { managedBadges, managedStages } = currentProfile.permissions;
                     
-                    const hasManagedStages = (managedStages || []).length > 0;
-                    const hasManagedBadges = (managedBadges || []).length > 0;
-                    const normCurrentBadge = normalizeArabic(badgeName as string);
-
-                    if (!hasManagedStages && !hasManagedBadges) return false;
-
-                    // If badges are selected, user MUST be restricted to them
-                    if (hasManagedBadges) {
-                      const matchesExplicit = (managedBadges || []).some(mb => normalizeArabic(mb) === normCurrentBadge);
-                      if (!matchesExplicit) return false;
-                    }
-
-                    // If stages are selected, the badge must be relevant to those stages
-                    if (hasManagedStages) {
-                      const inManagedStage = (badgeSettings.categories || []).some(cat => {
-                        const inSpecificStage = Object.entries(cat.stageBadges || {}).some(([stage, stageBadges]) => {
-                          return (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(stage)) &&
-                                 (stageBadges as string[] || []).some(sb => normalizeArabic(sb) === normCurrentBadge);
-                        });
-                        if (inSpecificStage) return true;
-
-                        const isGeneralToCategory = (cat.badges || []).some(cb => normalizeArabic(cb) === normCurrentBadge);
-                        const categoryHasManagedStage = Object.keys(cat.stageBadges || {}).some(stage => 
-                          (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(stage))
-                        );
-                        return isGeneralToCategory && categoryHasManagedStage;
-                      });
-
-                      if (!inManagedStage && !hasManagedBadges) return false;
-                    }
-                    
-                    return true;
+                    // Check if the admin can edit this badge in ANY stage
+                    return STAGES.some(stage => canEditBadge(stage, badgeName as string));
                   })
                   .map(badgeName => (
                   <option key={badgeName as string} value={badgeName as string}>{badgeName as string}</option>
