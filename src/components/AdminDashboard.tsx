@@ -251,7 +251,8 @@ enum OperationType {
   const canManageAttendance = isSuperAdmin || currentProfile?.permissions?.canManageAttendance;
   const canManagePayments = isSuperAdmin || currentProfile?.permissions?.canManagePayments;
   const canManageBadgeRequirements = isSuperAdmin || currentProfile?.permissions?.canManageBadgeRequirements;
-  const canAccessSettings = canManageAllBadges || canManageAttendance || canManagePayments || canDeleteAccounts;
+  const canAccessSettings = canManageAllBadges || canManageBadgeRequirements || canManageAttendance || canManagePayments || canDeleteAccounts;
+  const canManageCurrentBadgeReqs = isSuperAdmin || canManageAllBadges || !!(canManageBadgeRequirements && gradingSelectedBadge);
   
   const canDeleteThisScout = (scout: ScoutProfile) => {
     if (scout.uid === currentProfile?.uid) return false;
@@ -1957,7 +1958,7 @@ enum OperationType {
   if (isSuperAdmin) {
     availableTabs.push('groupLinks');
   }
-  if (canManageAllBadges) availableTabs.push('requirements');
+  if (canManageAllBadges || canManageBadgeRequirements) availableTabs.push('requirements');
   if (isSuperAdmin) availableTabs.push('general', 'activity_logs', 'deleted_accounts_logs');
   if (canManageAttendance || canManagePayments) availableTabs.push('attendance');
   if (canDeleteAccounts) availableTabs.push('cleanup');
@@ -2056,7 +2057,7 @@ enum OperationType {
                 روابط المجموعات
               </button>
             )}
-            {canManageAllBadges && (
+            {(canManageAllBadges || canManageBadgeRequirements) && (
               <button
                 onClick={() => setSettingsTab('requirements')}
                 className={`px-6 py-2 rounded-xl font-bold transition-all shrink-0 ${activeSettingsTab === 'requirements' ? 'bg-[#4285F4] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
@@ -3679,7 +3680,7 @@ enum OperationType {
             </div>
           </div>
           
-          {gradingSelectedBadge && (isSuperAdmin || canManageAllBadges) && (
+          {gradingSelectedBadge && canManageCurrentBadgeReqs && (
             <div className="bg-white p-4 lg:p-6 rounded-2xl border border-gray-200 shadow-sm mb-8">
               <div className="flex items-center gap-2 mb-6 text-[#4285F4]">
                 <Settings size={20} />
@@ -3904,7 +3905,7 @@ enum OperationType {
                           </thead>
                           <tbody>
                             {/* Final Score Row */}
-                            {canManageAllBadges && (
+                            {canManageCurrentBadgeReqs && (
                               <tr className="bg-blue-50/50 border-b border-blue-100">
                                 <td className="p-4 sticky right-0 bg-blue-50 z-10 border-l border-gray-200 font-black text-[#4285F4] w-[120px] md:w-[200px] min-w-[120px] md:min-w-[200px] max-w-[120px] md:max-w-[200px]">
                                   الدرجة النهائية
@@ -4058,7 +4059,7 @@ enum OperationType {
                     {/* Mobile Accordion View */}
                     <div className="flex flex-col gap-3 lg:hidden">
                       {/* Final Score Row for Admins */}
-                      {canManageAllBadges && (
+                      {canManageCurrentBadgeReqs && (
                         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                           <div className="text-[#4285F4] font-black mb-3">الدرجة النهائية</div>
                           {stageReqs.map((req, idx) => (
