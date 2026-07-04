@@ -134,6 +134,18 @@ export default function Auth() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const allowed = generalSettings.allowedRegistrationStages;
+    if (!allowed) return;
+    const isCurrentStageAllowed = allowed.includes(stage);
+    if (!isCurrentStageAllowed) {
+      const firstOpenStage = STAGES.find(s => allowed.includes(s));
+      if (firstOpenStage) {
+        setStage(firstOpenStage);
+      }
+    }
+  }, [generalSettings.allowedRegistrationStages, stage]);
+
   // Helper to normalize Arabic text for comparison
   const normalizeArabic = (str: string | undefined | null) => {
     if (!str) return '';
@@ -239,6 +251,14 @@ export default function Auth() {
       if (!isLogin) {
         if (!/^[\u0600-\u06FFa-zA-Z0-9\s]+$/.test(name.trim())) {
           throw new Error('الاسم يجب أن يحتوي على حروف عربية أو إنجليزية وأرقام ومسافات فقط، ولا يسمح بالرموز الخاصة.');
+        }
+      }
+
+      if (!isLogin && !isCompletingProfile) {
+        const allowedStages = generalSettings.allowedRegistrationStages;
+        const isStageAllowed = !allowedStages || allowedStages.includes(stage);
+        if (!isStageAllowed) {
+          throw new Error('التسجيل مغلق حالياً لهذه المرحلة، برجاء اختيار مرحلة أخرى.');
         }
       }
 
