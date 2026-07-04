@@ -307,10 +307,8 @@ enum OperationType {
       Object.entries(badgeCategory.stageBadges || {}).some(([stage, list]) => 
         normalizeArabic(stage) === normalizeArabic(scoutStage || '') && (list || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || ''))
       ) ||
-      // Or if it's a general badge and the category is available for this stage (we check if any stage is defined for this category. If none, it's global. If some, must match)
-      ((badgeCategory.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || '')) &&
-        (Object.keys(badgeCategory.stageBadges || {}).length === 0 || 
-         Object.keys(badgeCategory.stageBadges || {}).some(s => normalizeArabic(s) === normalizeArabic(scoutStage || ''))))
+      // Or if it's a general badge, it belongs to all stages
+      (badgeCategory.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || ''))
     ) : false;
 
     // If both are provided, they must both match (User's request for "registered for these same things")
@@ -3784,7 +3782,7 @@ enum OperationType {
                                      normalizeArabic(s.badges?.badge2?.name) === normalizedBadge || 
                                      normalizeArabic(s.badges?.badge3?.name) === normalizedBadge;
                     if (!hasBadge) return false;
-                    return canEditBadge(s.stage, gradingSelectedBadge, s.uid, s.role);
+                    return canEditBadge(s.stage, gradingSelectedBadge);
                   });
 
                   // Show stage if it has scouts OR if it has requirements (for super admin or stage admin to set scores)
