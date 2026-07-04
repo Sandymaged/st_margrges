@@ -300,13 +300,13 @@ enum OperationType {
     // Check if the badge belongs to a category that has this stage, or specifically belongs to this stage
     const badgeCategory = badgeSettings.categories.find(c => {
       const inGeneral = (c.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName));
-      const inSpecific = Object.values(c.stageBadges || {}).some(stageList => (stageList || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName)));
+      const inSpecific = (Object.values(c.stageBadges || {}) as (string[] | undefined)[]).some(stageList => (stageList || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName)));
       return inGeneral || inSpecific;
     });
 
     const badgeBelongsToStage = badgeCategory ? (
       // If it's a specific stage badge
-      Object.entries(badgeCategory.stageBadges || {}).some(([stage, list]) => 
+      (Object.entries(badgeCategory.stageBadges || {}) as [string, string[] | undefined][]).some(([stage, list]) => 
         normalizeArabic(stage) === normalizeArabic(scoutStage) && (list || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName))
       ) ||
       // Or if it's a general badge, it belongs to all stages
@@ -3593,7 +3593,7 @@ enum OperationType {
                     >
                       كل المراحل
                     </button>
-                    {STAGES.map(s => (
+                    {STAGES.filter(s => isSuperAdmin || canManageAllBadges || canEditBadge(s, gradingSelectedBadge)).map(s => (
                       <button
                         key={s}
                         onClick={() => setGradingStageFilter(s)}
@@ -3624,7 +3624,7 @@ enum OperationType {
                       className="flex-1 px-4 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 font-bold text-sm outline-none focus:ring-2 focus:ring-[#4285F4]"
                     >
                       <option value="" disabled hidden>المرحلة</option>
-                      {STAGES.map(s => (
+                      {STAGES.filter(s => isSuperAdmin || canManageAllBadges || canEditBadge(s, gradingSelectedBadge)).map(s => (
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
@@ -3784,11 +3784,11 @@ enum OperationType {
                                      normalizeArabic(s.badges?.badge2?.name) === normalizedBadge || 
                                      normalizeArabic(s.badges?.badge3?.name) === normalizedBadge;
                     if (!hasBadge) return false;
-                    return canEditBadge(s.stage, gradingSelectedBadge);
+                    return canEditBadge(s.stage, gradingSelectedBadge, s.uid, s.role);
                   });
 
                   // Show stage if it has scouts OR if it has requirements (for super admin or stage admin to set scores)
-                  const canManageStage = isSuperAdmin || canManageAllBadges || (currentProfile?.permissions?.managedStages || []).includes(stage as Stage);
+                  const canManageStage = isSuperAdmin || canManageAllBadges || canEditBadge(stage as Stage, gradingSelectedBadge);
                   if (stageScoutsWithBadge.length === 0 && !(canManageStage && stageReqs.length > 0)) return null;
 
                   if (stageReqs.length === 0) {
