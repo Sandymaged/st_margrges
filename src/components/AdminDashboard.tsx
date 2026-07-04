@@ -283,48 +283,50 @@ enum OperationType {
     // If target is an admin, only super admin can grade them
     if (scoutRole === 'admin' && !isSuperAdmin) return false;
 
-    if (canManageAllBadges) return true;
+    if (isSuperAdmin || canManageAllBadges) return true;
     if (!currentProfile?.permissions) return false;
     
-    const { managedStages, managedBadges } = currentProfile.permissions;
-    const hasManagedStages = (managedStages || []).length > 0;
-    const hasManagedBadges = (managedBadges || []).length > 0;
+    const managedStages = currentProfile.permissions.managedStages || [];
+    const managedBadges = currentProfile.permissions.managedBadges || [];
+    
+    const hasManagedStages = managedStages.length > 0;
+    const hasManagedBadges = managedBadges.length > 0;
 
     if (!hasManagedStages && !hasManagedBadges) return false;
 
-    const matchesStage = !hasManagedStages || (managedStages || []).some(ms => normalizeArabic(ms) === normalizeArabic(scoutStage || ''));
-    const matchesBadge = !hasManagedBadges || (managedBadges || []).some(mb => normalizeArabic(mb) === normalizeArabic(badgeName || ''));
+    const matchesStage = managedStages.some(ms => normalizeArabic(ms) === normalizeArabic(scoutStage));
+    const matchesBadge = managedBadges.some(mb => normalizeArabic(mb) === normalizeArabic(badgeName));
     
     // Check if the badge belongs to a category that has this stage, or specifically belongs to this stage
     const badgeCategory = badgeSettings.categories.find(c => {
-      const inGeneral = (c.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || ''));
-      const inSpecific = Object.values(c.stageBadges || {}).some(stageList => (stageList || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || '')));
+      const inGeneral = (c.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName));
+      const inSpecific = Object.values(c.stageBadges || {}).some(stageList => (stageList || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName)));
       return inGeneral || inSpecific;
     });
 
     const badgeBelongsToStage = badgeCategory ? (
       // If it's a specific stage badge
       Object.entries(badgeCategory.stageBadges || {}).some(([stage, list]) => 
-        normalizeArabic(stage) === normalizeArabic(scoutStage || '') && (list || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || ''))
+        normalizeArabic(stage) === normalizeArabic(scoutStage) && (list || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName))
       ) ||
       // Or if it's a general badge, it belongs to all stages
-      (badgeCategory.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName || ''))
+      (badgeCategory.badges || []).some(b => normalizeArabic(b) === normalizeArabic(badgeName))
     ) : false;
 
-    // If both are provided, they must both match (User's request for "registered for these same things")
+    // If both are provided, they must both match
     if (hasManagedStages && hasManagedBadges) {
       return matchesStage && matchesBadge && badgeBelongsToStage;
     }
     
     // If only one is provided, that one must match (the other is true by default)
     if (hasManagedBadges) {
-      return matchesBadge; // If they manage the badge, they can manage it for anyone
+      return matchesBadge;
     }
     
     if (hasManagedStages) {
-      return matchesStage && badgeBelongsToStage; // If they manage the stage, they can only manage badges that belong to this stage
+      return matchesStage && badgeBelongsToStage;
     }
-
+    
     return false;
   };
   
