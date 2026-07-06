@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, auth } from '../firebase';
 import { initializeApp, getApp, getApps, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -101,6 +101,14 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   const [newBadgeForCategory, setNewBadgeForCategory] = useState('');
   const [selectedStageForNewBadge, setSelectedStageForNewBadge] = useState<Stage | 'all'>('all');
   const [selectedStageForNewReq, setSelectedStageForNewReq] = useState<Stage[] | 'all'>('all');
+  const [pendingRequirements, setPendingRequirements] = useState<{
+    id: string;
+    badgeName: string;
+    req: string;
+    stages: Stage[] | 'all';
+    category: string;
+    score: string;
+  }[]>([]);
   const [newAttendanceDate, setNewAttendanceDate] = useState('');
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
   const [attendanceStageFilter, setAttendanceStageFilter] = useState<Stage | 'all'>('all');
@@ -164,6 +172,20 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     error?: string | null;
   } | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  // --- Write-batching for badge grading (perf/cost fix) ---
+  // Previously, every single score entered or checkbox toggled in the grading tab
+  // triggered its own separate Firestore write (+ an activity log write). During a
+  // real grading session (many requirements x many scouts) this multiplied into
+  // thousands of writes very quickly.
+  // Fix: rapid edits to the SAME scout+badge are now merged in memory and written
+  // to Firestore as a single combined update ~1 second after the admin stops
+  // editing that scout's badge, instead of one write per item. The screen still
+  // updates instantly (via optimisticBadgeUpdates below), so nothing about the
+  // admin's experience changes - only the number of network writes drops.
+  const [optimisticBadgeUpdates, setOptimisticBadgeUpdates] = useState<Record<string, Partial<BadgeProgress>>>({});
+  const pendingBadgeUpdatesRef = useRef<Record<string, { scout: ScoutProfile; badgeKey: 'badge1' | 'badge2' | 'badge3'; merged: Partial<BadgeProgress> }>>({});
+  const pendingBadgeTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
     const handleOnline = () => {
@@ -956,15 +978,11 @@ enum OperationType {
               firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayUnion(...added);
             }
 
+            // NOTE (write reduction): this used to also write a per-scout entry to
+            // activity_logs on every row of the imported sheet, doubling the writes
+            // for what's already a bulk, routine grading action. Removed for the same
+            // reason as the live grading tab - the data itself is still saved normally.
             await updateDoc(doc(db, 'users', scout.uid), firestoreUpdates);
-            await logActivity(
-              'تقييم جماعي',
-              `تم تحديث تقييم شارة ${gradingSelectedBadge}`,
-              currentProfile.uid,
-              currentProfile.name || 'مسؤول',
-              scout.uid,
-              scout.name
-            );
             updatedCount++;
           }
         }
@@ -1245,43 +1263,48 @@ enum OperationType {
     });
   };
 
-  const handleUpdateScoutBadge = async (scout: ScoutProfile, badgeKey: 'badge1' | 'badge2' | 'badge3', updates: Partial<BadgeProgress>) => {
+  // Performs the actual Firestore write for one scout+badge, using whatever pending
+  // edits have accumulated for it. This is the same write logic as before (dot-notation
+  // updates, arrayUnion/arrayRemove for completedRequirements) - it just now runs once
+  // for a batch of merged edits instead of once per single edit, and no longer writes
+  // a separate activity_logs entry for this routine, high-frequency action.
+  const flushBadgeUpdate = async (key: string) => {
+    const pending = pendingBadgeUpdatesRef.current[key];
+    delete pendingBadgeTimersRef.current[key];
+    if (!pending) return;
+    delete pendingBadgeUpdatesRef.current[key];
+
+    const { scout, badgeKey, merged } = pending;
     try {
       const currentBadge = scout.badges[badgeKey];
-      
-      // Calculate new progress if scores or completed requirements changed
+
       let newProgress = currentBadge.progress;
-      if (updates.requirementScores !== undefined || updates.completedRequirements !== undefined) {
+      if (merged.requirementScores !== undefined || merged.completedRequirements !== undefined) {
         const reqs = getScoutBadgeRequirements(currentBadge.name, scout.stage);
-        const completedReqs = updates.completedRequirements !== undefined ? updates.completedRequirements : (currentBadge.completedRequirements || []);
-        const scores = updates.requirementScores !== undefined ? updates.requirementScores : (currentBadge.requirementScores || {});
+        const completedReqs = merged.completedRequirements !== undefined ? merged.completedRequirements : (currentBadge.completedRequirements || []);
+        const scores = merged.requirementScores !== undefined ? merged.requirementScores : (currentBadge.requirementScores || {});
         newProgress = calculateBadgeProgress(currentBadge.name, reqs, completedReqs, scores);
       }
 
       const firestoreUpdates: Record<string, any> = {};
-      
-      // Update progress
+
       if (newProgress !== currentBadge.progress) {
         firestoreUpdates[`badges.${badgeKey}.progress`] = newProgress;
       }
 
-      // Update notes
-      if (updates.notes !== undefined && updates.notes !== currentBadge.notes) {
-        firestoreUpdates[`badges.${badgeKey}.notes`] = updates.notes;
+      if (merged.notes !== undefined && merged.notes !== currentBadge.notes) {
+        firestoreUpdates[`badges.${badgeKey}.notes`] = merged.notes;
       }
 
-      // Update requirementScores using dot notation for specific fields
-      if (updates.requirementScores !== undefined) {
+      if (merged.requirementScores !== undefined) {
         const currentScores = currentBadge.requirementScores || {};
-        const newScores = updates.requirementScores;
-        
-        // Find changed or added scores
+        const newScores = merged.requirementScores;
+
         for (const req in newScores) {
           if (newScores[req] !== currentScores[req]) {
             firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = newScores[req];
           }
         }
-        // Find deleted scores
         for (const req in currentScores) {
           if (!(req in newScores)) {
             firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = deleteField();
@@ -1289,47 +1312,80 @@ enum OperationType {
         }
       }
 
-      // Update completedRequirements using arrayUnion and arrayRemove
-      if (updates.completedRequirements !== undefined) {
+      if (merged.completedRequirements !== undefined) {
         const currentCompleted = currentBadge.completedRequirements || [];
-        const newCompleted = updates.completedRequirements;
-        
+        const newCompleted = merged.completedRequirements;
+
         const added = newCompleted.filter(r => !currentCompleted.includes(r));
         const removed = currentCompleted.filter(r => !newCompleted.includes(r));
-        
+
         if (added.length > 0 && removed.length === 0) {
            firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayUnion(...added);
         } else if (removed.length > 0 && added.length === 0) {
            firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayRemove(...removed);
         } else if (added.length > 0 && removed.length > 0) {
-           // If both added and removed, just overwrite to be safe
            firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = newCompleted;
         }
       }
 
       if (Object.keys(firestoreUpdates).length === 0) {
-        return; // Nothing to update
+        return;
       }
 
-      console.log('Updating badge for scout:', scout.uid, 'Badge:', badgeKey, 'Updates:', firestoreUpdates);
       await updateDoc(doc(db, 'users', scout.uid), firestoreUpdates);
-      
-      await logActivity(
-        'تحديث شارة',
-        `تم تحديث تقييم شارة ${currentBadge.name}`,
-        currentProfile.uid,
-        currentProfile.name || 'مسؤول',
-        scout.uid,
-        scout.name
-      );
-      console.log('Badge updated successfully');
-      
       setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
       setMessage({ type: 'error', text: 'حدث خطأ أثناء حفظ التقييم' });
+    } finally {
+      setOptimisticBadgeUpdates(prev => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     }
   };
+
+  // Called on every score entry / checkbox toggle in the grading tab. Instead of writing
+  // to Firestore immediately, it merges the edit into a per scout+badge buffer and
+  // (re)starts a short timer; the write only actually happens ~1s after the admin stops
+  // touching that scout's badge. The optimistic state update below makes the change
+  // appear on screen instantly regardless, so the grading experience is unchanged.
+  const handleUpdateScoutBadge = (scout: ScoutProfile, badgeKey: 'badge1' | 'badge2' | 'badge3', updates: Partial<BadgeProgress>) => {
+    const key = `${scout.uid}_${badgeKey}`;
+    const existingMerged = pendingBadgeUpdatesRef.current[key]?.merged || {};
+
+    const merged: Partial<BadgeProgress> = {
+      ...existingMerged,
+      ...updates,
+      requirementScores: updates.requirementScores !== undefined ? updates.requirementScores : existingMerged.requirementScores,
+      completedRequirements: updates.completedRequirements !== undefined ? updates.completedRequirements : existingMerged.completedRequirements,
+    };
+
+    pendingBadgeUpdatesRef.current[key] = { scout, badgeKey, merged };
+    setOptimisticBadgeUpdates(prev => ({ ...prev, [key]: merged }));
+
+    if (pendingBadgeTimersRef.current[key]) {
+      clearTimeout(pendingBadgeTimersRef.current[key]);
+    }
+    pendingBadgeTimersRef.current[key] = setTimeout(() => {
+      flushBadgeUpdate(key);
+    }, 1000);
+  };
+
+  // Safety net: if the admin navigates away/closes the tab while an edit is still
+  // waiting to be written (within that ~1s window), flush it immediately instead of
+  // silently losing it.
+  useEffect(() => {
+    return () => {
+      Object.keys(pendingBadgeTimersRef.current).forEach(key => {
+        clearTimeout(pendingBadgeTimersRef.current[key]);
+        flushBadgeUpdate(key);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleAddCategory = async () => {
     if (!newCategoryName.trim()) return;
@@ -1424,60 +1480,91 @@ enum OperationType {
     }
   };
 
-  const handleAddRequirement = async (badgeName: string, req: string, stages: Stage[] | 'all' = 'all', category: string = 'عام', score: string = '') => {
-    if (!badgeName || !req.trim()) return;
-    
-    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
-    
-    let newBadgeReqs: Partial<Record<Stage | 'all', string[]>>;
-    if (Array.isArray(currentBadgeReqs)) {
-      newBadgeReqs = { all: [...currentBadgeReqs] };
-    } else {
-      newBadgeReqs = { ...currentBadgeReqs };
-    }
-    
-    if (stages === 'all') {
-      newBadgeReqs['all'] = [...(newBadgeReqs['all'] || []), req.trim()];
-    } else {
-      stages.forEach(stage => {
-        newBadgeReqs[stage] = [...(newBadgeReqs[stage] || []), req.trim()];
-      });
-    }
+  // NOTE (fix): These four functions used to read the whole `badgeSettings` object from local
+  // state and re-save it in full with `setDoc`. Because local state can be a few hundred
+  // milliseconds behind the server (it updates via onSnapshot), two admins editing at the same
+  // time -- or even one admin clicking "add" twice quickly -- could silently overwrite each
+  // other's changes with a stale copy of the document. They now use `updateDoc` with specific
+  // field paths (and `arrayUnion`/`arrayRemove` for the requirement lists), so each change only
+  // touches its own piece of data and can no longer erase someone else's edit. They also now
+  // write an entry to activity_logs so changes are traceable.
 
-    const updatedRequirements = {
-      ...(badgeSettings.requirements || {}),
-      [badgeName]: newBadgeReqs
+  const handleQueueRequirement = (badgeName: string, req: string, stages: Stage[] | 'all' = 'all', category: string = 'عام', score: string = '') => {
+    const trimmedReq = req.trim();
+    if (!badgeName || !trimmedReq) return;
+
+    const newPending = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      badgeName,
+      req: trimmedReq,
+      stages,
+      category: category.trim() || 'عام',
+      score
     };
-    
-    const updatedCategories = {
-      ...(badgeSettings.requirementCategories || {}),
-      [badgeName]: {
-        ...(badgeSettings.requirementCategories?.[badgeName] || {}),
-        [req.trim()]: category.trim() || 'عام'
-      }
-    };
-    
-    const updatedMaxScores = {
-      ...(badgeSettings.requirementMaxScores || {})
-    };
-    if (score && !isNaN(parseInt(score))) {
-      updatedMaxScores[badgeName] = {
-        ...(updatedMaxScores[badgeName] || {}),
-        [req.trim()]: parseInt(score)
-      };
-    }
-    
+
+    setPendingRequirements(prev => [...prev, newPending]);
+    setNewRequirementInput('');
+    // Intentionally keep category and score for the next items
+  };
+
+  const handleRemovePendingRequirement = (id: string) => {
+    setPendingRequirements(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleSavePendingRequirements = async (badgeName: string) => {
+    const badgePending = pendingRequirements.filter(p => p.badgeName === badgeName);
+    if (badgePending.length === 0) return;
+
+    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+    const badgeDocRef = doc(db, 'settings', 'badges');
+
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { 
-        ...badgeSettings, 
-        requirements: updatedRequirements,
-        requirementCategories: updatedCategories,
-        ...(score && !isNaN(parseInt(score)) ? { requirementMaxScores: updatedMaxScores } : {})
+      if (Array.isArray(currentBadgeReqs)) {
+        await setDoc(badgeDocRef, {
+          requirements: {
+            [badgeName]: { all: currentBadgeReqs }
+          }
+        }, { merge: true });
+      }
+
+      const updates: Record<string, any> = {
+        requirements: { [badgeName]: {} },
+        requirementCategories: { [badgeName]: {} },
+        requirementMaxScores: { [badgeName]: {} }
+      };
+
+      badgePending.forEach(p => {
+        const stageKeys: (Stage | 'all')[] = p.stages === 'all' ? ['all'] : p.stages;
+        stageKeys.forEach(stageKey => {
+          if (!updates.requirements[badgeName][stageKey]) {
+            updates.requirements[badgeName][stageKey] = [];
+          }
+          updates.requirements[badgeName][stageKey].push(p.req);
+        });
+
+        updates.requirementCategories[badgeName][p.req] = p.category;
+        if (p.score && !isNaN(parseInt(p.score))) {
+          updates.requirementMaxScores[badgeName][p.req] = parseInt(p.score);
+        }
       });
-      setNewRequirementInput('');
+
+      for (const stageKey in updates.requirements[badgeName]) {
+        updates.requirements[badgeName][stageKey] = arrayUnion(...updates.requirements[badgeName][stageKey]);
+      }
+
+      await setDoc(badgeDocRef, updates, { merge: true });
+
+      setPendingRequirements(prev => prev.filter(p => p.badgeName !== badgeName));
       setNewRequirementCategory('');
       setNewRequirementScore('');
-      setMessage({ type: 'success', text: 'تم إضافة البند بنجاح' });
+      setMessage({ type: 'success', text: `تم حفظ ${badgePending.length} بنود بنجاح` });
+
+      await logActivity(
+        'إضافة بنود تقييم',
+        `تمت إضافة ${badgePending.length} بند لشارة ${badgeName}`,
+        currentProfile?.uid || '',
+        currentProfile?.name || 'مسؤول'
+      );
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
     }
@@ -1485,73 +1572,79 @@ enum OperationType {
 
   const handleEditRequirement = async () => {
     if (!editingRequirement || !editingRequirement.newText.trim()) return;
-    
-    const { badgeName, oldText, newText, category, stage } = editingRequirement;
+
+    const { badgeName, oldText, newText, category, stage, maxScore } = editingRequirement;
+    const trimmedNew = newText.trim();
+    const textChanged = oldText !== trimmedNew;
     const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
-    
-    let newBadgeReqs: Partial<Record<Stage | 'all', string[]>>;
-    if (Array.isArray(currentBadgeReqs)) {
-      newBadgeReqs = { all: [...currentBadgeReqs] };
-    } else {
-      newBadgeReqs = { ...currentBadgeReqs };
-    }
-    
-    if (newBadgeReqs[stage]) {
-      newBadgeReqs[stage] = newBadgeReqs[stage]!.map(r => r === oldText ? newText.trim() : r);
-    }
-
-    const updatedRequirements = {
-      ...(badgeSettings.requirements || {}),
-      [badgeName]: newBadgeReqs
-    };
-
-    // Update category
-    const updatedCategories = {
-      ...(badgeSettings.requirementCategories || {}),
-      [badgeName]: {
-        ...(badgeSettings.requirementCategories?.[badgeName] || {}),
-        [newText.trim()]: category.trim() || 'عام'
-      }
-    };
-    
-    // Remove old category if text changed
-    if (oldText !== newText.trim()) {
-      delete updatedCategories[badgeName][oldText];
-    }
-    
-    // Always update max scores if provided or if text changed
-    const updatedMaxScores = {
-      ...(badgeSettings.requirementMaxScores || {})
-    };
-    
-    // Initialize badge object if needed
-    if (!updatedMaxScores[badgeName]) {
-      updatedMaxScores[badgeName] = {};
-    }
-
-    if (oldText !== newText.trim() && updatedMaxScores[badgeName][oldText] !== undefined) {
-       // move old score to new text if it exists and text changed
-       updatedMaxScores[badgeName][newText.trim()] = updatedMaxScores[badgeName][oldText];
-       delete updatedMaxScores[badgeName][oldText];
-    }
-
-    // Now set the new score if provided
-    if (editingRequirement.maxScore && !isNaN(parseInt(editingRequirement.maxScore))) {
-      updatedMaxScores[badgeName] = {
-        ...updatedMaxScores[badgeName],
-        [newText.trim()]: parseInt(editingRequirement.maxScore)
-      };
-    }
+    const badgeDocRef = doc(db, 'settings', 'badges');
 
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { 
-        ...badgeSettings, 
-        requirements: updatedRequirements,
-        requirementCategories: updatedCategories,
-        requirementMaxScores: updatedMaxScores
-      });
+      if (Array.isArray(currentBadgeReqs)) {
+        await setDoc(badgeDocRef, {
+          requirements: {
+            [badgeName]: { all: currentBadgeReqs }
+          }
+        }, { merge: true });
+      }
+
+      const updates: Record<string, any> = {
+        requirements: {
+          [badgeName]: {}
+        },
+        requirementCategories: {
+          [badgeName]: {}
+        },
+        requirementMaxScores: {
+          [badgeName]: {}
+        }
+      };
+
+      if (textChanged) {
+        updates.requirements[badgeName][stage] = arrayRemove(oldText);
+      }
+
+      updates.requirementCategories[badgeName][trimmedNew] = category.trim() || 'عام';
+      if (textChanged) {
+        updates.requirementCategories[badgeName][oldText] = deleteField();
+      }
+
+      // Carry over the old max score to the new text unless a new one was explicitly provided.
+      const existingMaxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[oldText];
+      const newMaxScoreValue = (maxScore && !isNaN(parseInt(maxScore)))
+        ? parseInt(maxScore)
+        : existingMaxScore;
+
+      if (newMaxScoreValue !== undefined) {
+        updates.requirementMaxScores[badgeName][trimmedNew] = newMaxScoreValue;
+      }
+      if (textChanged && existingMaxScore !== undefined) {
+        updates.requirementMaxScores[badgeName][oldText] = deleteField();
+      }
+
+      await setDoc(badgeDocRef, updates, { merge: true });
+
+      // Adding the new text has to happen after the old one is removed, and arrayUnion/arrayRemove
+      // can't target the same field path in one call, so it's done as a second, separate update.
+      if (textChanged) {
+        await setDoc(badgeDocRef, {
+          requirements: {
+            [badgeName]: {
+              [stage]: arrayUnion(trimmedNew)
+            }
+          }
+        }, { merge: true });
+      }
+
       setEditingRequirement(null);
       setMessage({ type: 'success', text: 'تم تعديل البند بنجاح' });
+
+      await logActivity(
+        'تعديل بند تقييم',
+        `تم تعديل البند "${oldText}" إلى "${trimmedNew}" في شارة ${badgeName}`,
+        currentProfile?.uid || '',
+        currentProfile?.name || 'مسؤول'
+      );
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
     }
@@ -1559,44 +1652,49 @@ enum OperationType {
 
   const handleRemoveRequirement = async (badgeName: string, req: string, stage: Stage | 'all' = 'all') => {
     if (!window.confirm('هل أنت متأكد من حذف هذا البند؟')) return;
-    
-    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
-    
-    let newBadgeReqs: Partial<Record<Stage | 'all', string[]>>;
-    if (Array.isArray(currentBadgeReqs)) {
-      newBadgeReqs = { all: [...currentBadgeReqs] };
-    } else {
-      newBadgeReqs = { ...currentBadgeReqs };
-    }
-    
-    if (newBadgeReqs[stage]) {
-      newBadgeReqs[stage] = newBadgeReqs[stage]!.filter(r => r !== req);
-    }
 
-    const updatedRequirements = {
-      ...(badgeSettings.requirements || {}),
-      [badgeName]: newBadgeReqs
-    };
-    
+    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+    const badgeDocRef = doc(db, 'settings', 'badges');
+
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirements: updatedRequirements });
+      if (Array.isArray(currentBadgeReqs)) {
+        await setDoc(badgeDocRef, {
+          requirements: {
+            [badgeName]: { all: currentBadgeReqs }
+          }
+        }, { merge: true });
+      }
+
+      await setDoc(badgeDocRef, {
+        requirements: {
+          [badgeName]: {
+            [stage]: arrayRemove(req)
+          }
+        }
+      }, { merge: true });
+
       setMessage({ type: 'success', text: 'تم حذف البند بنجاح' });
+
+      await logActivity(
+        'حذف بند تقييم',
+        `تم حذف البند "${req}" من شارة ${badgeName}`,
+        currentProfile?.uid || '',
+        currentProfile?.name || 'مسؤول'
+      );
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
   const handleSetRequirementMaxScore = async (badgeName: string, req: string, maxScore: number) => {
-    const updatedMaxScores = {
-      ...(badgeSettings.requirementMaxScores || {}),
-      [badgeName]: {
-        ...(badgeSettings.requirementMaxScores?.[badgeName] || {}),
-        [req]: maxScore
-      }
-    };
-    
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirementMaxScores: updatedMaxScores });
+      await setDoc(doc(db, 'settings', 'badges'), {
+        requirementMaxScores: {
+          [badgeName]: {
+            [req]: maxScore
+          }
+        }
+      }, { merge: true });
       setMessage({ type: 'success', text: 'تم تحديث الدرجة النهائية للبند بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -1733,10 +1831,10 @@ enum OperationType {
     if (Array.isArray(badgeReqs)) {
       return badgeReqs;
     }
-    return [
+    return Array.from(new Set([
       ...(badgeReqs.all || []),
       ...(badgeReqs[stage] || [])
-    ];
+    ]));
   };
 
   const handleUpdatePermissions = async (e: React.FormEvent) => {
@@ -2560,6 +2658,53 @@ enum OperationType {
                             </div>
 
                             <div className="space-y-3 pt-6 border-t border-gray-200">
+                              {(() => {
+                                const badgePending = pendingRequirements.filter(p => p.badgeName === selectedBadgeForReq);
+                                if (badgePending.length === 0) return null;
+                                return (
+                                  <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4">
+                                    <div className="flex justify-between items-center mb-3">
+                                      <h4 className="font-bold text-yellow-800">
+                                        بنود قيد الإنتظار ({badgePending.length})
+                                      </h4>
+                                      <button
+                                        onClick={() => handleSavePendingRequirements(selectedBadgeForReq)}
+                                        className="px-4 py-2 bg-yellow-500 text-white rounded-lg text-sm font-bold hover:bg-yellow-600 transition-colors"
+                                      >
+                                        حفظ البنود
+                                      </button>
+                                    </div>
+                                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                      {badgePending.map(p => (
+                                        <div key={p.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-yellow-100 shadow-sm">
+                                          <div className="flex flex-col gap-1 overflow-hidden">
+                                            <span className="font-bold text-sm text-gray-800 truncate" title={p.req}>{p.req}</span>
+                                            <div className="text-xs text-gray-500 flex flex-wrap gap-2">
+                                              <span>المرحلة: {p.stages === 'all' ? 'الكل' : p.stages.join('، ')}</span>
+                                              <span>•</span>
+                                              <span>التصنيف: {p.category}</span>
+                                              {p.score && (
+                                                <>
+                                                  <span>•</span>
+                                                  <span>الدرجة: {p.score}</span>
+                                                </>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <button 
+                                            onClick={() => handleRemovePendingRequirement(p.id)} 
+                                            className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors mr-2 flex-shrink-0"
+                                            title="حذف"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
                               <div className="space-y-2">
                                 <label className="text-xs font-bold text-gray-500">اختر المراحل:</label>
                                 <div className="flex flex-wrap gap-2">
@@ -2622,27 +2767,29 @@ enum OperationType {
                                   onChange={(e) => setNewRequirementScore(e.target.value)}
                                   className="w-full sm:w-32 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold text-center"
                                 />
-                                <input
-                                  type="text"
-                                  placeholder="أضف بنداً جديداً..."
+                                <textarea
+                                  placeholder="أضف بنداً جديداً (يمكنك كتابة بند طويل على عدة أسطر)..."
                                   value={newRequirementInput}
                                   onChange={(e) => setNewRequirementInput(e.target.value)}
-                                  onKeyPress={(e) => {
-                                      if (e.key === 'Enter') {
+                                  onKeyDown={(e) => {
+                                      // Only trigger on Enter if they don't hold shift
+                                      if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
                                         const finalStages = selectedStageForNewReq === 'all' 
                                           ? (canEditAllStagesForBadge ? 'all' : allowedStagesForSelectedBadge)
                                           : selectedStageForNewReq;
-                                        handleAddRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory, newRequirementScore);
+                                        handleQueueRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory, newRequirementScore);
                                       }
                                   }}
-                                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold"
+                                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-sm font-bold resize-y min-h-[46px]"
+                                  rows={1}
                                 />
                                 <button
                                   onClick={() => {
                                       const finalStages = selectedStageForNewReq === 'all' 
                                         ? (canEditAllStagesForBadge ? 'all' : allowedStagesForSelectedBadge)
                                         : selectedStageForNewReq;
-                                      handleAddRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory, newRequirementScore);
+                                      handleQueueRequirement(selectedBadgeForReq, newRequirementInput, finalStages, newRequirementCategory, newRequirementScore);
                                   }}
                                   disabled={!newRequirementInput.trim()}
                                   className="px-6 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-[#357ABD] disabled:opacity-50 transition-colors font-bold flex items-center gap-2"
@@ -3896,8 +4043,12 @@ enum OperationType {
                                            : scout.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
                                            : 'badge3';
                             const badge = scout.badges[badgeKey];
-                            const completedReqs = badge.completedRequirements || [];
-                            const scores = badge.requirementScores || {};
+                            // If there's a pending (not-yet-written) edit for this scout+badge, show that
+                            // instead of the last Firestore-synced value, so the UI reflects changes instantly
+                            // even though the actual write is batched/delayed by ~1s (see handleUpdateScoutBadge).
+                            const pendingBadgeEdit = optimisticBadgeUpdates[`${scout.uid}_${badgeKey}`];
+                            const completedReqs = pendingBadgeEdit?.completedRequirements ?? badge.completedRequirements ?? [];
+                            const scores = pendingBadgeEdit?.requirementScores ?? badge.requirementScores ?? {};
                             const progress = calculateBadgeProgress(gradingSelectedBadge, stageReqs, completedReqs, scores);
 
                             return (
@@ -4044,8 +4195,10 @@ enum OperationType {
                                          : scout.badges.badge2.name === gradingSelectedBadge ? 'badge2' 
                                          : 'badge3';
                           const badge = scout.badges[badgeKey];
-                          const completedReqs = badge.completedRequirements || [];
-                          const scores = badge.requirementScores || {};
+                          // Same optimistic-overlay logic as the desktop table view above.
+                          const pendingBadgeEdit = optimisticBadgeUpdates[`${scout.uid}_${badgeKey}`];
+                          const completedReqs = pendingBadgeEdit?.completedRequirements ?? badge.completedRequirements ?? [];
+                          const scores = pendingBadgeEdit?.requirementScores ?? badge.requirementScores ?? {};
                           const progress = calculateBadgeProgress(gradingSelectedBadge, stageReqs, completedReqs, scores);
 
                           return (

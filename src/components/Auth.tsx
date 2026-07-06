@@ -311,7 +311,15 @@ export default function Auth() {
         try {
           await setDoc(doc(db, 'users', user.uid), profile);
         } catch (err) {
+          if (!isCompletingProfile && user) {
+            try {
+              await user.delete();
+            } catch (deleteErr) {
+              console.error('Failed to rollback auth user creation:', deleteErr);
+            }
+          }
           handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+          throw new Error('حدث خطأ أثناء حفظ البيانات. يرجى المحاولة مرة أخرى.');
         }
       }
     } catch (err: any) {
