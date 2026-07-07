@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { auth, db } from './firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, updateDoc, setDoc } from 'firebase/firestore';
+import type { User } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
+import { usePolling } from './lib/usePolling';
+import { rowToScoutProfile, PROFILE_COLUMNS } from './lib/mappers';
 import { ScoutProfile, GeneralSettings } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
@@ -52,100 +53,84 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<'profile' | 'dashboard'>('profile');
 
-  useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data() as GeneralSettings;
-        setGeneralSettings({
-          ...data,
-          logoUrl: '/syncc.png'
-        });
-      }
-    }, (error) => {
-      console.warn("Failed to fetch general settings:", error);
-    });
-    return () => unsubscribe();
-  }, []);
+  usePolling(async () => {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
+    if (error) {
+      console.warn('Failed to fetch general settings:', error);
+      return;
+    }
+    const value = data?.value as GeneralSettings | undefined;
+    if (value) {
+      setGeneralSettings({ ...value, logoUrl: '/syncc.png' });
+    }
+  }, 10000);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
       setIsAuthReady(true);
-      if (!u) {
+      if (!session?.user) {
         setProfile(null);
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+    return () => subscription.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
+  usePolling(async () => {
     if (!user) return;
 
-    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data() as ScoutProfile;
-        setProfile(data);
-      } else {
-        const adminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL;
-        const adminPhone = import.meta.env.VITE_SUPER_ADMIN_PHONE;
-        const isSuperAdmin = 
-          (adminEmail && user.email === adminEmail) || 
-          (adminPhone && user.email === `${adminPhone}@scouts.local`) || 
-          (adminPhone && user.phoneNumber === `+20${adminPhone.replace(/^0+/, '')}`) ||
-          (adminPhone && user.phoneNumber === `+${adminPhone}`);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(PROFILE_COLUMNS)
+      .eq('id', user.id)
+      .maybeSingle();
 
-        if (isSuperAdmin) {
-          const adminProfile: ScoutProfile = {
-            uid: user.uid,
-            name: 'مسؤول النظام',
-            stage: 'قادة',
-            role: 'admin',
-            number: adminPhone || '0',
-            email: user.email || adminEmail || '',
-            isVerified: true,
-            createdAt: new Date(),
-            badges: {
-              badge1: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} },
-              badge2: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} },
-              badge3: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} }
-            },
-            joinDate: new Date(),
-            permissions: {
-              canManagePermissions: true,
-              canManageAllBadges: true,
-              canManagePayments: true,
-              canManageBadgeRequirements: true,
-              canDeleteAccounts: true,
-              managedStages: ['أشبال', 'زهرات', 'كشاف', 'مرشدات', 'متقدم', 'رائدات', 'قادة'],
-              managedBadges: []
-            }
-          };
-          setDoc(doc(db, 'users', user.uid), adminProfile).catch(console.error);
-        } else {
-          setProfile(null);
-        }
-      }
-      setLoading(false);
-    }, (error) => {
+    if (error) {
       console.error('Profile fetch error:', error);
       setLoading(false);
-    });
+      return;
+    }
 
-    return () => unsubscribe();
-  }, [user]);
+    if (data) {
+      setProfile(rowToScoutProfile(data));
+      setLoading(false);
+      return;
+    }
+
+    const adminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL;
+    const adminPhone = import.meta.env.VITE_SUPER_ADMIN_PHONE;
+    const isSuperAdmin =
+      (adminEmail && user.email === adminEmail) ||
+      (adminPhone && user.email === `${adminPhone}@scouts.local`);
+
+    if (isSuperAdmin) {
+      const { error: bootstrapError } = await supabase.rpc('bootstrap_first_admin', {
+        p_name: 'مسؤول النظام',
+        p_number: adminPhone || '0',
+        p_email: user.email || adminEmail || '',
+      });
+      if (bootstrapError) {
+        console.error('Admin bootstrap failed:', bootstrapError);
+      }
+      // Next poll tick will pick up the newly created profile row.
+    } else {
+      setProfile(null);
+    }
+    setLoading(false);
+  }, 5000, !!user);
 
   if (!isAuthReady) {
     return (
       <div className="min-h-screen bg-[#F0F2F5] flex items-center justify-center">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           className="flex flex-col items-center gap-4"
         >
-          <img 
-            src="/syncc.png" 
-            alt="Scouts Logo" 
+          <img
+            src="/syncc.png"
+            alt="Scouts Logo"
             className="h-24 w-24 animate-pulse object-contain"
           />
           <div className="animate-spin rounded-full h-8 w-8 border-4 border-[#4285F4] border-t-transparent" />
@@ -185,7 +170,7 @@ export default function App() {
           >
             <Auth />
             <button
-              onClick={() => auth.signOut()}
+              onClick={() => supabase.auth.signOut()}
               className="mt-8 text-gray-500 font-bold hover:text-red-600 transition-all flex items-center gap-2"
             >
               <LogOut size={20} />
@@ -200,8 +185,8 @@ export default function App() {
             exit={{ opacity: 0, y: -15 }}
             transition={{ duration: 0.3 }}
           >
-            {((profile.role === 'admin' || profile.permissions?.canManagePermissions || 
-             (import.meta.env.VITE_SUPER_ADMIN_EMAIL && profile.email === import.meta.env.VITE_SUPER_ADMIN_EMAIL) || 
+            {((profile.role === 'admin' || profile.permissions?.canManagePermissions ||
+             (import.meta.env.VITE_SUPER_ADMIN_EMAIL && profile.email === import.meta.env.VITE_SUPER_ADMIN_EMAIL) ||
              (import.meta.env.VITE_SUPER_ADMIN_PHONE && profile.number === import.meta.env.VITE_SUPER_ADMIN_PHONE)) && view === 'dashboard') ? (
               <AdminDashboard currentProfile={profile} />
             ) : (
@@ -213,5 +198,3 @@ export default function App() {
     </Layout>
   );
 }
-
-

@@ -7,3 +7,5 @@ coverage/
 .env*
 !.env.example
 grep_output.txt
+service-account.json
+migration-temp-passwords.json

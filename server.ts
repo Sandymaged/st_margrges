@@ -9,12 +9,11 @@ import cors from "cors";
 // Use environment variables (Vercel will provide these in production)
 dotenv.config();
 
-import { initAdmin, admin } from "./api/admin/lib/admin.js";
-
-// Initialize Firebase Admin
-const status = initAdmin();
-const adminApp = (status.initialized && admin && typeof admin.app === 'function') ? admin.app() : null;
-const initError = status.error;
+import statusHandler from "./api/admin/status.js";
+import deleteUserHandler from "./api/admin/delete-user.js";
+import updatePhoneHandler from "./api/admin/update-phone.js";
+import updatePasswordHandler from "./api/admin/update-password.js";
+import createAccountHandler from "./api/admin/create-account.js";
 
 async function startServer() {
   const app = express();
@@ -64,207 +63,13 @@ async function startServer() {
     res.json({ status: "pong", timestamp: new Date().toISOString() });
   });
 
-  app.get("/api/admin/status", (req, res) => {
-    res.json(status);
-  });
-
-  // API Routes
-  app.post(["/api/admin/delete-user", "/api/admin/delete-user/"], async (req, res) => {
-    console.log("Received delete-user request:", req.body.phone || req.body.uid);
-    if (!adminApp) {
-      console.error("Admin SDK not initialized");
-      return res.status(500).json({ error: "Firebase Admin not initialized. Check server logs for details." });
-    }
-
-    const { uid, phone, adminToken } = req.body;
-
-    if (!uid && !phone) {
-      return res.status(400).json({ error: "UID or Phone is required." });
-    }
-
-    try {
-      // Verify the requester is an admin
-      const decodedToken = await admin.auth().verifyIdToken(adminToken);
-      
-      // Check if the requester is the super admin
-      const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
-      const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
-      
-      const isSuperAdmin = 
-        (superAdminEmail && decodedToken.email === superAdminEmail) || 
-        (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
-        (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
-      
-      let canDelete = isSuperAdmin;
-      
-      if (!canDelete) {
-        // Check Firestore permissions
-        const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-        if (requesterDoc.exists) {
-          const data = requesterDoc.data();
-          if (data?.role === 'admin') {
-            canDelete = true;
-          }
-        }
-      }
-      
-      if (!canDelete) {
-        return res.status(403).json({ error: "Unauthorized. Only authorized admins can delete users." });
-      }
-
-      let deletedFromAuth = false;
-      let deletedFromFirestore = false;
-
-      if (uid) {
-        try {
-          await admin.auth().deleteUser(uid);
-          deletedFromAuth = true;
-        } catch (error: any) {
-          if (error.code !== 'auth/user-not-found') throw error;
-        }
-        
-        try {
-          await admin.firestore().collection('users').doc(uid).delete();
-          deletedFromFirestore = true;
-        } catch (error) {
-          console.error("Error deleting from Firestore by UID:", error);
-        }
-      } else if (phone) {
-        const fakeEmail = `${phone}@scouts.local`;
-        try {
-          const userRecord = await admin.auth().getUserByEmail(fakeEmail);
-          await admin.auth().deleteUser(userRecord.uid);
-          deletedFromAuth = true;
-          
-          await admin.firestore().collection('users').doc(userRecord.uid).delete();
-          deletedFromFirestore = true;
-        } catch (error: any) {
-          if (error.code !== 'auth/user-not-found') throw error;
-        }
-
-        // Try to find and delete by phone number in Firestore if auth user not found or just to be sure
-        const usersRef = admin.firestore().collection('users');
-        const snapshot = await usersRef.where('number', '==', phone).get();
-        if (!snapshot.empty) {
-          const batch = admin.firestore().batch();
-          snapshot.docs.forEach(doc => {
-            batch.delete(doc.ref);
-          });
-          await batch.commit();
-          deletedFromFirestore = true;
-        }
-      }
-
-      if (deletedFromAuth || deletedFromFirestore) {
-        return res.json({ message: `Successfully deleted user. Auth: ${deletedFromAuth}, Firestore: ${deletedFromFirestore}` });
-      } else {
-        return res.status(404).json({ error: "User not found in Authentication or Firestore." });
-      }
-
-    } catch (error: any) {
-      console.error("Error deleting user:", error);
-      res.status(500).json({ error: error.message || "Failed to delete user." });
-    }
-  });
-
-  app.post(["/api/admin/update-phone", "/api/admin/update-phone/"], async (req, res) => {
-    console.log("Received update-phone request:", req.body.uid);
-    if (!adminApp) {
-      console.error("Admin SDK not initialized");
-      return res.status(500).json({ error: "Firebase Admin not initialized. Check server logs for details." });
-    }
-
-    const { uid, newPhone, adminToken } = req.body;
-
-    if (!uid || !newPhone) {
-      return res.status(400).json({ error: "UID and newPhone are required." });
-    }
-
-    try {
-      // Verify the requester is an admin
-      const decodedToken = await admin.auth().verifyIdToken(adminToken);
-      
-      // Check if the requester is the super admin
-      const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
-      const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
-      
-      let isSuperAdmin = 
-        (superAdminEmail && decodedToken.email === superAdminEmail) || 
-        (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
-        (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
-      
-      if (!isSuperAdmin) {
-        const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-        if (requesterDoc.exists && (requesterDoc.data()?.permissions?.canManagePermissions || requesterDoc.data()?.role === 'admin')) {
-          isSuperAdmin = true;
-        }
-      }
-
-      if (!isSuperAdmin) {
-        return res.status(403).json({ error: "Unauthorized. Only super admins can change phone numbers." });
-      }
-
-      const fakeEmail = `${newPhone}@scouts.local`;
-      await admin.auth().updateUser(uid, {
-        email: fakeEmail
-      });
-
-      return res.json({ message: "Successfully updated user phone (email)." });
-
-    } catch (error: any) {
-      console.error("Error updating phone:", error);
-      res.status(500).json({ error: error.message || "Failed to update phone." });
-    }
-  });
-
-  app.post(["/api/admin/update-password", "/api/admin/update-password/"], async (req, res) => {
-    console.log("Received update-password request:", req.body.uid);
-    if (!adminApp) {
-      console.error("Admin SDK not initialized");
-      return res.status(500).json({ error: "Firebase Admin not initialized. Check server logs for details." });
-    }
-
-    const { uid, newPassword, adminToken } = req.body;
-
-    if (!uid || !newPassword) {
-      return res.status(400).json({ error: "UID and newPassword are required." });
-    }
-
-    try {
-      // Verify the requester is an admin
-      const decodedToken = await admin.auth().verifyIdToken(adminToken);
-      
-      // Check if the requester is the super admin
-      const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
-      const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
-      
-      let isSuperAdmin = 
-        (superAdminEmail && decodedToken.email === superAdminEmail) || 
-        (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
-        (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
-      
-      if (!isSuperAdmin) {
-        const requesterDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
-        if (requesterDoc.exists && (requesterDoc.data()?.permissions?.canManagePermissions || requesterDoc.data()?.role === 'admin')) {
-          isSuperAdmin = true;
-        }
-      }
-
-      if (!isSuperAdmin) {
-        return res.status(403).json({ error: "Unauthorized. Only super admins can change passwords." });
-      }
-
-      await admin.auth().updateUser(uid, {
-        password: newPassword
-      });
-
-      return res.json({ message: "Successfully updated user password." });
-
-    } catch (error: any) {
-      console.error("Error updating password:", error);
-      res.status(500).json({ error: error.message || "Failed to update password." });
-    }
-  });
+  // Admin routes delegate to the same handlers Vercel uses in production
+  // (api/admin/*.ts) so there is a single source of truth for this logic.
+  app.all(["/api/admin/status", "/api/admin/status/"], (req, res) => statusHandler(req as any, res as any));
+  app.all(["/api/admin/delete-user", "/api/admin/delete-user/"], (req, res) => deleteUserHandler(req as any, res as any));
+  app.all(["/api/admin/update-phone", "/api/admin/update-phone/"], (req, res) => updatePhoneHandler(req as any, res as any));
+  app.all(["/api/admin/update-password", "/api/admin/update-password/"], (req, res) => updatePasswordHandler(req as any, res as any));
+  app.all(["/api/admin/create-account", "/api/admin/create-account/"], (req, res) => createAccountHandler(req as any, res as any));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

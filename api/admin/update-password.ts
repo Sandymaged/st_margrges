@@ -1,9 +1,8 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { initAdmin, admin, getDb } from './lib/admin.js';
+import { initStatus, getSupabaseAdmin, verifyAdminToken } from './lib/admin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const status = initAdmin();
-  // Enable CORS
+  const status = initStatus();
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -22,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (!status.initialized) {
-    return res.status(500).json({ error: "Firebase Admin not initialized. " + (status.error || "") });
+    return res.status(500).json({ error: 'Supabase admin not configured. ' + (status.error || '') });
   }
 
   try {
@@ -31,46 +30,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         body = JSON.parse(body);
       } catch (e) {
-        console.error("Failed to parse req.body:", e);
+        console.error('Failed to parse req.body:', e);
       }
     }
     const { uid, newPassword, adminToken } = body;
 
     if (!uid || !newPassword) {
-      return res.status(400).json({ error: "UID and newPassword are required." });
+      return res.status(400).json({ error: 'UID and newPassword are required.' });
     }
 
-    // Verify the requester is an admin
-    const decodedToken = await admin.auth().verifyIdToken(adminToken);
-    
-    // Check if the requester is the super admin
-    const superAdminEmail = process.env.VITE_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
-    const superAdminPhone = process.env.VITE_SUPER_ADMIN_PHONE || process.env.SUPER_ADMIN_PHONE;
-    
-    let isSuperAdmin = 
-      (superAdminEmail && decodedToken.email === superAdminEmail) || 
-      (superAdminPhone && decodedToken.email === `${superAdminPhone}@scouts.local`) || 
-      (superAdminPhone && (decodedToken.phone_number === `+20${superAdminPhone.replace(/^0+/, '')}` || decodedToken.phone_number === `+${superAdminPhone}`));
-    
-    if (!isSuperAdmin) {
-      const requesterDoc = await getDb().collection('users').doc(decodedToken.uid).get();
-      if (requesterDoc.exists && (requesterDoc.data()?.permissions?.canManagePermissions || requesterDoc.data()?.role === 'admin')) {
-        isSuperAdmin = true;
-      }
+    const requester = await verifyAdminToken(adminToken);
+
+    if (!requester.isAdmin) {
+      return res.status(403).json({ error: 'Unauthorized. Only admins can change passwords.' });
     }
 
-    if (!isSuperAdmin) {
-      return res.status(403).json({ error: "Unauthorized. Only super admins can change passwords." });
-    }
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(uid, { password: newPassword });
+    if (error) throw error;
 
-    await admin.auth().updateUser(uid, {
-      password: newPassword
-    });
-
-    return res.status(200).json({ message: "Successfully updated user password." });
-
+    return res.status(200).json({ message: 'Successfully updated user password.' });
   } catch (error: any) {
-    console.error("Error updating password:", error);
-    return res.status(500).json({ error: error.message || "Failed to update password." });
+    console.error('Error updating password:', error);
+    return res.status(500).json({ error: error.message || 'Failed to update password.' });
   }
 }

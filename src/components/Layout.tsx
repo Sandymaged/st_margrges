@@ -1,17 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { auth } from '../firebase';
-import { signOut } from 'firebase/auth';
+import { supabase } from '../supabaseClient';
 import { LogOut, User as UserIcon, Home, LayoutDashboard, Menu, X, ChevronDown, Camera, Edit2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { doc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
-import { GeneralSettings } from '../types';
+import type { User } from '@supabase/supabase-js';
+import { GeneralSettings, ScoutProfile } from '../types';
 
 interface LayoutProps {
   children: React.ReactNode;
-  user: any;
-  profile: any;
+  user: User | null;
+  profile: ScoutProfile | null;
   view?: 'profile' | 'dashboard';
   setView?: (view: 'profile' | 'dashboard') => void;
   generalSettings: GeneralSettings;
@@ -61,10 +58,17 @@ export default function Layout({ children, user, profile, view, setView, general
 
     setIsUpdatingLogo(true);
     try {
-      const storageRef = ref(storage, 'settings/logo');
-      await uploadBytes(storageRef, file);
-      const downloadUrl = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'settings', 'general'), { logoUrl: downloadUrl });
+      const { error: uploadError } = await supabase.storage
+        .from('assets')
+        .upload('settings/logo', file, { upsert: true, contentType: file.type });
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage.from('assets').getPublicUrl('settings/logo');
+      const { error: rpcError } = await supabase.rpc('merge_app_settings', {
+        p_key: 'general',
+        p_patch: { logoUrl: `${publicUrlData.publicUrl}?t=${Date.now()}` },
+      });
+      if (rpcError) throw rpcError;
     } catch (error) {
       console.error('Error uploading logo:', error);
       alert('حدث خطأ أثناء رفع اللوجو');
@@ -77,9 +81,11 @@ export default function Layout({ children, user, profile, view, setView, general
   const handleUpdateGroupName = async () => {
     const newName = window.prompt('أدخل اسم المجموعة الجديد:', generalSettings.scoutGroupName);
     if (newName && newName !== generalSettings.scoutGroupName) {
-      try {
-        await updateDoc(doc(db, 'settings', 'general'), { scoutGroupName: newName });
-      } catch (error) {
+      const { error } = await supabase.rpc('merge_app_settings', {
+        p_key: 'general',
+        p_patch: { scoutGroupName: newName },
+      });
+      if (error) {
         console.error('Error updating group name:', error);
         alert('حدث خطأ أثناء تحديث اسم المجموعة');
       }
@@ -87,7 +93,7 @@ export default function Layout({ children, user, profile, view, setView, general
   };
 
   const handleLogout = () => {
-    signOut(auth);
+    supabase.auth.signOut();
     setIsMenuOpen(false);
   };
 
@@ -169,7 +175,7 @@ export default function Layout({ children, user, profile, view, setView, general
                     <UserIcon size={14} />
                   </div>
                   <span className="text-sm font-bold">
-                    {profile?.name || profile?.number || user.phoneNumber || 'مستخدم'}
+                    {profile?.name || profile?.number || user.email?.split('@')[0] || 'مستخدم'}
                   </span>
                 </div>
 
@@ -202,7 +208,7 @@ export default function Layout({ children, user, profile, view, setView, general
                           {profile?.name || 'مستخدم'}
                         </span>
                         <span className="text-[10px] text-gray-400 font-bold">
-                          {profile?.number || user.phoneNumber}
+                          {profile?.number || user.email?.split('@')[0]}
                         </span>
                       </div>
                     </div>

@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Profile {
+  id                 String    @id @db.Uuid
+  name               String
+  email              String
+  number             String    @unique
+  stage              String
+  team               String?
+  role               String    @default("scout")
+  isVerified         Boolean   @default(true) @map("is_verified")
+  showWelcomeGroups  Boolean   @default(true) @map("show_welcome_groups")
+  amountPaid         Decimal?  @default(0) @map("amount_paid")
+  attendance         Json      @default("{}")
+  badges             Json      @default("{}")
+  pastWaves          Json      @default("{}") @map("past_waves")
+  passedBadges       String[]  @default([]) @map("passed_badges")
+  permissions        Json?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  joinDate           DateTime  @default(now()) @map("join_date")
+
+  activityLogsAsAdmin  ActivityLog[]        @relation("ActivityLogAdmin")
+  activityLogsAsTarget ActivityLog[]        @relation("ActivityLogTarget")
+  deletedAccountLogs   DeletedAccountLog[]  @relation("DeletedAccountLogDeletedBy")
+
+  @@map("profiles")
+}
+
+model AppSetting {
+  key   String @id
+  value Json
+
+  @@map("app_settings")
+}
+
+model ActivityLog {
+  id             String    @id @default(uuid()) @db.Uuid
+  action         String
+  details        String
+  adminId        String    @map("admin_id") @db.Uuid
+  adminName      String    @map("admin_name")
+  targetUserId   String?   @map("target_user_id") @db.Uuid
+  targetUserName String?   @map("target_user_name")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  admin  Profile  @relation("ActivityLogAdmin", fields: [adminId], references: [id])
+  target Profile? @relation("ActivityLogTarget", fields: [targetUserId], references: [id])
+
+  @@map("activity_logs")
+}
+
+model DeletedAccountLog {
+  id                  String   @id @default(uuid()) @db.Uuid
+  deletedScoutNumber  String?  @map("deleted_scout_number")
+  deletedBy           String?  @map("deleted_by") @db.Uuid
+  deletedByName       String?  @map("deleted_by_name")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  deletedByProfile Profile? @relation("DeletedAccountLogDeletedBy", fields: [deletedBy], references: [id])
+
+  @@map("deleted_accounts_logs")
+}

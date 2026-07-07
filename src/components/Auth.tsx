@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { auth, db } from '../firebase';
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword,
-} from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { supabase } from '../supabaseClient';
+import { usePolling } from '../lib/usePolling';
 import { STAGES, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage, DEFAULT_CATEGORIES, GeneralSettings } from '../types';
-import { 
-  LogIn, 
-  UserPlus, 
-  User as UserIcon, 
-  Hash, 
-  MapPin, 
+import {
+  LogIn,
+  UserPlus,
+  User as UserIcon,
+  Hash,
+  MapPin,
   Lock,
   AlertCircle,
   MessageSquare,
@@ -22,55 +18,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+function logAndRethrow(error: unknown, operation: string, path: string): never {
+  console.error(`Supabase error during ${operation} on ${path}:`, error);
+  throw error instanceof Error ? error : new Error(String(error));
 }
 
 export default function Auth() {
@@ -102,37 +52,37 @@ export default function Auth() {
   const [selectedCategory2, setSelectedCategory2] = useState('');
   const [visibleBadges, setVisibleBadges] = useState<number>(1);
 
-  useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setBadgeSettings({
-          categories: data.categories || DEFAULT_CATEGORIES,
-          requirements: data.requirements || {},
-          requirementMaxScores: data.requirementMaxScores || {},
-          requirementCategories: data.requirementCategories || {}
-        });
-      }
-    }, (error) => {
-      console.warn("Failed to fetch badges settings:", error);
-    });
-    return () => unsubscribe();
-  }, []);
+  usePolling(async () => {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
+    if (error) {
+      console.warn('Failed to fetch badges settings:', error);
+      return;
+    }
+    const value = data?.value as any;
+    if (value) {
+      setBadgeSettings({
+        categories: value.categories || DEFAULT_CATEGORIES,
+        requirements: value.requirements || {},
+        requirementMaxScores: value.requirementMaxScores || {},
+        requirementCategories: value.requirementCategories || {}
+      });
+    }
+  }, 10000);
 
-  useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as GeneralSettings;
-        setGeneralSettings({
-          ...data,
-          logoUrl: '/syncc.png'
-        });
-      }
-    }, (error) => {
-      console.warn("Failed to fetch general settings:", error);
-    });
-    return () => unsubscribe();
-  }, []);
+  usePolling(async () => {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
+    if (error) {
+      console.warn('Failed to fetch general settings:', error);
+      return;
+    }
+    const value = data?.value as GeneralSettings | undefined;
+    if (value) {
+      setGeneralSettings({
+        ...value,
+        logoUrl: '/syncc.png'
+      });
+    }
+  }, 10000);
 
   useEffect(() => {
     const allowed = generalSettings.allowedRegistrationStages;
@@ -194,16 +144,21 @@ export default function Auth() {
     }
   }, [badgeSettings, stage, selectedCategory1, selectedCategory2]);
 
+  const [currentUser, setCurrentUser] = useState<{ id: string; email?: string } | null>(null);
+
   useEffect(() => {
-    if (auth.currentUser) {
-      setIsCompletingProfile(true);
-      setIsLogin(false);
-      // Pre-fill phone if possible from email
-      const emailPhone = auth.currentUser.email?.split('@')[0];
-      if (emailPhone && PHONE_REGEX.test(emailPhone)) {
-        setPhone(emailPhone);
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        setCurrentUser({ id: data.user.id, email: data.user.email ?? undefined });
+        setIsCompletingProfile(true);
+        setIsLogin(false);
+        // Pre-fill phone if possible from email
+        const emailPhone = data.user.email?.split('@')[0];
+        if (emailPhone && PHONE_REGEX.test(emailPhone)) {
+          setPhone(emailPhone);
+        }
       }
-    }
+    });
   }, []);
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -269,7 +224,8 @@ export default function Auth() {
       const fakeEmail = `${phone}@scouts.local`;
 
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, fakeEmail, trimmedPassword);
+        const { error } = await supabase.auth.signInWithPassword({ email: fakeEmail, password: trimmedPassword });
+        if (error) throw error;
       } else {
         // Sign Up or Complete Profile Flow
         const selectedBadges = [badge1];
@@ -280,56 +236,47 @@ export default function Auth() {
           throw new Error('لا يمكن اختيار نفس الشارة أكثر من مرة');
         }
 
-        let user;
-        if (isCompletingProfile && auth.currentUser) {
-          user = auth.currentUser;
+        let userId: string;
+        if (isCompletingProfile && currentUser) {
+          userId = currentUser.id;
         } else {
-          // Create User in Auth
-          const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, trimmedPassword);
-          user = userCredential.user;
+          const { data, error } = await supabase.auth.signUp({ email: fakeEmail, password: trimmedPassword });
+          if (error) throw error;
+          if (!data.user) throw new Error('حدث خطأ أثناء إنشاء الحساب.');
+          userId = data.user.id;
         }
 
         // Create profile
-        const profile: ScoutProfile = {
-          uid: user.uid,
+        const profile = {
+          id: userId,
           name,
           email: fakeEmail,
-          stage,
           number: phone,
+          stage,
           badges: {
             badge1: { name: badge1, progress: 0, notes: '', completedRequirements: [] },
             badge2: { name: visibleBadges >= 2 ? badge2 : '', progress: 0, notes: '', completedRequirements: [] },
             badge3: { name: '', progress: 0, notes: '', completedRequirements: [] },
           },
           role: 'scout',
-          isVerified: true, // Set to true by default
-          showWelcomeGroups: true, // Show group links on first login
-          createdAt: serverTimestamp(),
-          joinDate: serverTimestamp(),
+          is_verified: true,
+          show_welcome_groups: true,
         };
 
-        try {
-          await setDoc(doc(db, 'users', user.uid), profile);
-        } catch (err) {
-          if (!isCompletingProfile && user) {
-            try {
-              await user.delete();
-            } catch (deleteErr) {
-              console.error('Failed to rollback auth user creation:', deleteErr);
-            }
-          }
-          handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
-          throw new Error('حدث خطأ أثناء حفظ البيانات. يرجى المحاولة مرة أخرى.');
+        const { error: insertError } = await supabase.from('profiles').insert(profile);
+        if (insertError) {
+          logAndRethrow(insertError, 'insert', `profiles/${userId}`);
         }
       }
     } catch (err: any) {
       console.error('Auth error:', err);
-      if (err.code === 'auth/email-already-in-use') {
+      const message: string = err?.message || '';
+      if (message.includes('already registered') || message.includes('already exists') || err?.code === '23505') {
         setError('هذا الرقم مسجل بالفعل');
-      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+      } else if (message.includes('Invalid login credentials')) {
         setError('رقم الهاتف أو كلمة المرور غير صحيحة');
       } else {
-        setError(err.message || 'حدث خطأ ما، يرجى المحاولة مرة أخرى');
+        setError(message || 'حدث خطأ ما، يرجى المحاولة مرة أخرى');
       }
     } finally {
       setLoading(false);

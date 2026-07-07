@@ -1,9 +1,8 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { initAdmin, admin } from './lib/admin.js';
+import { initStatus } from './lib/admin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const status = initAdmin();
-  // Enable CORS
+  const status = initStatus();
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');

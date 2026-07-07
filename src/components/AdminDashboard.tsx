@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { db, auth } from '../firebase';
-import { initializeApp, getApp, getApps, deleteApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
-import { collection, onSnapshot, query, doc, updateDoc, setDoc, deleteDoc, serverTimestamp, deleteField, arrayUnion, arrayRemove, writeBatch } from 'firebase/firestore';
-import { 
+import { supabase } from '../supabaseClient';
+import { usePolling } from '../lib/usePolling';
+import { rowToScoutProfile, PROFILE_COLUMNS } from '../lib/mappers';
+import {
   ScoutProfile, 
   STAGES, 
   BadgeSettings, 
@@ -388,36 +386,42 @@ enum OperationType {
   }, [message]);
 
   const handleFirestoreError = (error: any, operation: string, path: string) => {
-    console.error(`Firestore Error (${operation}) at ${path}:`, error);
+    console.error(`Supabase Error (${operation}) at ${path}:`, error);
     const errorMsg = error?.message || String(error);
-    if (errorMsg.includes('permission-denied')) {
+    if (errorMsg.includes('permission-denied') || errorMsg.toLowerCase().includes('not authorized') || errorMsg.toLowerCase().includes('only admins')) {
       setMessage({ type: 'error', text: 'ليس لديك صلاحية للقيام بهذا الإجراء' });
     } else {
       setMessage({ type: 'error', text: `حدث خطأ: ${errorMsg}` });
     }
   };
 
-  useEffect(() => {
-    const q = query(collection(db, 'users'));
-    const unsubscribeUsers = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as ScoutProfile));
-      // Store all users, we will filter in the UI
-      setScouts(data);
+  // Polling replaces Firestore's onSnapshot real-time listeners - Postgres has no
+  // client-side realtime subscription in this app's architecture, so each of these
+  // re-fetches on an interval instead (see ../lib/usePolling).
+  const fetchScouts = async () => {
+    try {
+      const { data, error } = await supabase.from('profiles').select(PROFILE_COLUMNS);
+      if (error) throw error;
+      setScouts((data || []).map(rowToScoutProfile));
+    } catch (error) {
+      console.error('Supabase error fetching scouts:', error);
+    } finally {
       setLoading(false);
-    }, (error) => {
-      console.error('Firestore error:', error);
-      setLoading(false);
-    });
+    }
+  };
 
-    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as BadgeSettings;
+  const fetchBadgeSettings = async () => {
+    try {
+      const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
+      if (error) throw error;
+      if (data) {
+        const value = data.value as BadgeSettings;
         setBadgeSettings({
-          categories: data.categories || DEFAULT_CATEGORIES,
-          requirements: data.requirements || {},
-          requirementMaxScores: data.requirementMaxScores || {},
-          requirementCategories: data.requirementCategories || {},
-          groupLinks: data.groupLinks || {}
+          categories: value.categories || DEFAULT_CATEGORIES,
+          requirements: value.requirements || {},
+          requirementMaxScores: value.requirementMaxScores || {},
+          requirementCategories: value.requirementCategories || {},
+          groupLinks: value.groupLinks || {}
         });
       } else {
         setBadgeSettings({
@@ -427,119 +431,118 @@ enum OperationType {
           requirementCategories: {}
         });
       }
-    }, (error) => {
-      console.warn("Failed to fetch badges settings:", error);
-    });
+    } catch (error) {
+      console.warn('Failed to fetch badges settings:', error);
+    }
+  };
 
-    const unsubscribeGeneralSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as GeneralSettings;
+  const fetchGeneralSettings = async () => {
+    try {
+      const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
+      if (error) throw error;
+      if (data) {
+        const value = data.value as GeneralSettings;
         setGeneralSettings({
           logoUrl: '/syncc.png',
-          scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
-          allowedRegistrationStages: data.allowedRegistrationStages || [...STAGES],
-          badgePrice: data.badgePrice || 30,
-          attendanceDates: data.attendanceDates || [],
-          activeWave: data.activeWave || 'wave1',
-          showResults: data.showResults || false
+          scoutGroupName: value.scoutGroupName || 'مجموعة مارجرجس الكشفية',
+          allowedRegistrationStages: value.allowedRegistrationStages || [...STAGES],
+          badgePrice: value.badgePrice || 30,
+          attendanceDates: value.attendanceDates || [],
+          activeWave: value.activeWave || 'wave1',
+          showResults: value.showResults || false
         });
       }
-    }, (error) => {
-      console.warn("Failed to fetch general settings:", error);
-    });
-
-    let unsubscribeLogs: any = null;
-    let unsubscribeDeletedLogs: any = null;
-    if (isSuperAdmin) {
-      unsubscribeLogs = onSnapshot(query(collection(db, 'activity_logs')), (snapshot) => {
-        const logs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-        logs.sort((a: any, b: any) => {
-          const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
-          const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
-          return timeB - timeA;
-        });
-        setActivityLogs(logs);
-      }, (error) => {
-        console.warn('Activity logs listener error (might be expected if not fully granted superadmin in firestore):', error);
-      });
-
-      unsubscribeDeletedLogs = onSnapshot(query(collection(db, 'deleted_accounts_logs')), (snapshot) => {
-        const logs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-        logs.sort((a: any, b: any) => {
-          const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
-          const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
-          return timeB - timeA;
-        });
-        setDeletedAccountsLogs(logs);
-      }, (error) => {
-        console.warn('Deleted logs listener error (might be expected if not fully granted superadmin in firestore):', error);
-      });
+    } catch (error) {
+      console.warn('Failed to fetch general settings:', error);
     }
+  };
 
-    return () => {
-      unsubscribeUsers();
-      unsubscribeSettings();
-      unsubscribeGeneralSettings();
-      if (unsubscribeLogs) unsubscribeLogs();
-      if (unsubscribeDeletedLogs) unsubscribeDeletedLogs();
-    };
-  }, [isSuperAdmin]);
+  const fetchActivityLogs = async () => {
+    try {
+      const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      setActivityLogs((data || []).map((row: any) => ({
+        id: row.id,
+        action: row.action,
+        details: row.details,
+        adminName: row.admin_name,
+        targetUserName: row.target_user_name,
+        timestamp: row.created_at
+      })));
+    } catch (error) {
+      console.warn('Activity logs fetch error (might be expected if not superadmin):', error);
+    }
+  };
+
+  const fetchDeletedAccountsLogs = async () => {
+    try {
+      const { data, error } = await supabase.from('deleted_accounts_logs').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      setDeletedAccountsLogs((data || []).map((row: any) => ({
+        id: row.id,
+        deletedScoutNumber: row.deleted_scout_number,
+        deletedByName: row.deleted_by_name,
+        timestamp: row.created_at
+      })));
+    } catch (error) {
+      console.warn('Deleted logs fetch error (might be expected if not superadmin):', error);
+    }
+  };
+
+  usePolling(fetchScouts, 6000);
+  usePolling(fetchBadgeSettings, 8000);
+  usePolling(fetchGeneralSettings, 8000);
+  usePolling(fetchActivityLogs, 8000, isSuperAdmin);
+  usePolling(fetchDeletedAccountsLogs, 8000, isSuperAdmin);
 
   const handleEndWave1 = async () => {
     if (!window.confirm('هل أنت متأكد من إنهاء الدفعة الأولى؟ سيتم حفظ نتائج الكشافة الحالية في أرشيف الدفعة الأولى، ونقل الشارات الناجحة، والسماح لهم باختيار شارات الدفعة الثانية. هذا الإجراء لا يمكن التراجع عنه بسهولة.')) return;
     
     try {
       setLoading(true);
-      
-      const chunkArray = (arr: any[], size: number) => {
-        return Array.from({ length: Math.ceil(arr.length / size) }, (v, i) =>
-          arr.slice(i * size, i * size + size)
-        );
-      };
-      
-      const scoutChunks = chunkArray(scouts, 490);
-      
-      for (const chunk of scoutChunks) {
-        const batch = writeBatch(db);
-        chunk.forEach(scout => {
-          const passed: string[] = [];
-          // Check badge1, badge2, badge3
-          ['badge1', 'badge2', 'badge3'].forEach(key => {
-            const b = scout.badges[key as keyof typeof scout.badges];
-            if (b && b.name) {
-              const reqs = badgeSettings.requirements[b.name]?.[scout.stage] || [];
-              const hasPassed = checkBadgePassStatus(b.name, reqs, b.completedRequirements || [], b.requirementScores || {});
-              if (hasPassed) {
-                passed.push(b.name);
-              }
-            }
-          });
 
-          const newPassedBadges = Array.from(new Set([...(scout.passedBadges || []), ...passed]));
-          
-          batch.update(doc(db, 'users', scout.uid), {
-            pastWaves: {
-              ...(scout.pastWaves || {}),
-              wave1: { badges: scout.badges }
-            },
-            passedBadges: newPassedBadges,
-            badges: {
-              badge1: { name: '', progress: 0, notes: '', completedRequirements: [] },
-              badge2: { name: '', progress: 0, notes: '', completedRequirements: [] },
-              badge3: { name: '', progress: 0, notes: '', completedRequirements: [] }
+      // NOTE: Postgres has no client-side multi-row atomic batch like Firestore's
+      // writeBatch here - each scout is updated independently via Promise.all. This
+      // trades away the old cross-row atomicity guarantee (an accepted, known
+      // limitation of the Firestore -> Supabase migration).
+      const results = await Promise.all(scouts.map(scout => {
+        const passed: string[] = [];
+        // Check badge1, badge2, badge3
+        ['badge1', 'badge2', 'badge3'].forEach(key => {
+          const b = scout.badges[key as keyof typeof scout.badges];
+          if (b && b.name) {
+            const reqs = badgeSettings.requirements[b.name]?.[scout.stage] || [];
+            const hasPassed = checkBadgePassStatus(b.name, reqs, b.completedRequirements || [], b.requirementScores || {});
+            if (hasPassed) {
+              passed.push(b.name);
             }
-          });
+          }
         });
-        await batch.commit();
-      }
-      
-      const settingsBatch = writeBatch(db);
-      settingsBatch.update(doc(db, 'settings', 'general'), {
-        activeWave: 'wave2',
-        showResults: true
+
+        const newPassedBadges = Array.from(new Set([...(scout.passedBadges || []), ...passed]));
+
+        return supabase.from('profiles').update({
+          past_waves: {
+            ...(scout.pastWaves || {}),
+            wave1: { badges: scout.badges }
+          },
+          passed_badges: newPassedBadges,
+          badges: {
+            badge1: { name: '', progress: 0, notes: '', completedRequirements: [] },
+            badge2: { name: '', progress: 0, notes: '', completedRequirements: [] },
+            badge3: { name: '', progress: 0, notes: '', completedRequirements: [] }
+          }
+        }).eq('id', scout.uid);
+      }));
+      const failedScoutUpdate = results.find(r => r.error);
+      if (failedScoutUpdate?.error) throw failedScoutUpdate.error;
+
+      const { error: settingsError } = await supabase.rpc('merge_app_settings', {
+        p_key: 'general',
+        p_patch: { activeWave: 'wave2', showResults: true }
       });
-      await settingsBatch.commit();
-      
+      if (settingsError) throw settingsError;
+
       setMessage({ type: 'success', text: 'تم إنهاء الدفعة الأولى بنجاح، وتم تفعيل الدفعة الثانية وإظهار النتائج.' });
     } catch (error) {
       handleFirestoreError(error, 'End Wave 1', 'batch');
@@ -553,36 +556,25 @@ enum OperationType {
     
     try {
       setLoading(true);
-      
-      const chunkArray = (arr: any[], size: number) => {
-        return Array.from({ length: Math.ceil(arr.length / size) }, (v, i) =>
-          arr.slice(i * size, i * size + size)
-        );
-      };
-      
-      const scoutChunks = chunkArray(scouts, 490);
-      
-      for (const chunk of scoutChunks) {
-        const batch = writeBatch(db);
-        chunk.forEach(scout => {
-          if (scout.pastWaves && scout.pastWaves.wave1) {
-            batch.update(doc(db, 'users', scout.uid), {
-              badges: scout.pastWaves.wave1.badges,
-              'pastWaves.wave1': deleteField(),
-              passedBadges: deleteField()
-            });
-          }
-        });
-        await batch.commit();
-      }
-      
-      const settingsBatch = writeBatch(db);
-      settingsBatch.update(doc(db, 'settings', 'general'), {
-        activeWave: 'wave1',
-        showResults: false
+
+      const scoutsWithWave1 = scouts.filter(s => s.pastWaves && s.pastWaves.wave1);
+      const results = await Promise.all(scoutsWithWave1.map(scout => {
+        const { wave1, ...restWaves } = scout.pastWaves || {};
+        return supabase.from('profiles').update({
+          badges: scout.pastWaves!.wave1!.badges,
+          past_waves: restWaves,
+          passed_badges: []
+        }).eq('id', scout.uid);
+      }));
+      const failedScoutUpdate = results.find(r => r.error);
+      if (failedScoutUpdate?.error) throw failedScoutUpdate.error;
+
+      const { error: settingsError } = await supabase.rpc('merge_app_settings', {
+        p_key: 'general',
+        p_patch: { activeWave: 'wave1', showResults: false }
       });
-      await settingsBatch.commit();
-      
+      if (settingsError) throw settingsError;
+
       setMessage({ type: 'success', text: 'تم التراجع عن إنهاء الدفعة الأولى بنجاح.' });
     } catch (error) {
       handleFirestoreError(error, 'Revert Wave 1', 'batch');
@@ -712,11 +704,11 @@ enum OperationType {
 
     if (hasChanges) {
       try {
-        await setDoc(doc(db, 'settings', 'badges'), {
-          ...badgeSettings,
-          requirements: updatedRequirements,
-          categories: updatedCategories
+        const { error } = await supabase.rpc('merge_app_settings', {
+          p_key: 'badges',
+          p_patch: { requirements: updatedRequirements, categories: updatedCategories }
         });
+        if (error) throw error;
         setMessage({ type: 'success', text: 'تم تحديث متطلبات وتصنيفات الشارات للمراحل الجديدة بنجاح' });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -741,10 +733,9 @@ enum OperationType {
     }
 
     try {
-      await updateDoc(doc(db, 'users', scout.uid), {
-        [`attendance.${scannerDate}`]: true
-      });
-      
+      const { error } = await supabase.rpc('set_attendance', { p_user_id: scout.uid, p_date: scannerDate, p_present: true });
+      if (error) throw error;
+
       const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setScanLogs(prev => [{ uid: scout.uid, name: scout.name, time: timeStr, action: 'تسجيل حضور' }, ...prev]);
       
@@ -766,11 +757,10 @@ enum OperationType {
   const handleUndoScan = async (scoutUid: string, logIndex: number) => {
     if (!scannerDate) return;
     try {
-      await updateDoc(doc(db, 'users', scoutUid), {
-        [`attendance.${scannerDate}`]: false
-      });
-      
-      setScanLogs(prev => prev.map((log, idx) => 
+      const { error } = await supabase.rpc('set_attendance', { p_user_id: scoutUid, p_date: scannerDate, p_present: false });
+      if (error) throw error;
+
+      setScanLogs(prev => prev.map((log, idx) =>
         idx === logIndex ? { ...log, action: 'إلغاء حضور' } : log
       ));
       
@@ -840,44 +830,45 @@ enum OperationType {
     }
 
     setCreatingAccount(true);
-    let secondaryApp;
     try {
-      const secondaryAppName = `secondary-app-${Date.now()}`;
-      secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
-      const secondaryAuth = getAuth(secondaryApp);
+      // Supabase's browser client has no equivalent to Firebase's "secondary app
+      // instance" trick for creating another user without signing the current admin
+      // out - calling supabase.auth.signUp() here would sign the admin's own session
+      // out and in as the new user. So this goes through a backend endpoint using the
+      // Supabase service-role key instead.
+      const response = await fetch('/api/admin/create-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newAccountForm.name,
+          phone: newAccountForm.phone,
+          password: newAccountForm.password,
+          stage: newAccountForm.stage,
+          role: newAccountForm.role,
+          adminToken: (await supabase.auth.getSession()).data.session?.access_token
+        })
+      });
 
-      const fakeEmail = `${newAccountForm.phone}@scouts.local`;
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, fakeEmail, newAccountForm.password);
-      const user = userCredential.user;
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch (e) {
+        // response body may not be JSON on some failure modes; handled by response.ok below
+      }
 
-      const profile: ScoutProfile = {
-        uid: user.uid,
-        name: newAccountForm.name,
-        email: fakeEmail,
-        stage: newAccountForm.stage,
-        number: newAccountForm.phone,
-        badges: {
-          badge1: { name: '', progress: 0, notes: '', completedRequirements: [] },
-          badge2: { name: '', progress: 0, notes: '', completedRequirements: [] },
-          badge3: { name: '', progress: 0, notes: '', completedRequirements: [] },
-        },
-        role: newAccountForm.role,
-        isVerified: true,
-        createdAt: serverTimestamp(),
-        joinDate: serverTimestamp(),
-      };
+      if (!response.ok) {
+        throw new Error((data && data.error) || 'حدث خطأ أثناء إنشاء الحساب');
+      }
 
-      await setDoc(doc(db, 'users', user.uid), profile);
       await logActivity(
         'إنشاء حساب',
         `تم إنشاء حساب جديد بدور ${newAccountForm.role}`,
         currentProfile.uid,
         currentProfile.name || 'مسؤول',
-        user.uid,
+        data?.uid,
         newAccountForm.name
       );
-      await signOut(secondaryAuth);
-      
+
       setMessage({ type: 'success', text: 'تم إنشاء الحساب بنجاح' });
       setNewAccountForm({
         name: '',
@@ -888,21 +879,8 @@ enum OperationType {
       });
     } catch (error: any) {
       console.error('Error creating account:', error);
-      let errorMsg = 'حدث خطأ أثناء إنشاء الحساب';
-      if (error.code === 'auth/email-already-in-use') {
-        errorMsg = 'هذا الرقم مسجل بالفعل';
-      } else if (error.code === 'auth/weak-password') {
-        errorMsg = 'كلمة المرور ضعيفة جداً';
-      }
-      setMessage({ type: 'error', text: errorMsg });
+      setMessage({ type: 'error', text: error.message || 'حدث خطأ أثناء إنشاء الحساب' });
     } finally {
-      if (secondaryApp) {
-        try {
-          await deleteApp(secondaryApp);
-        } catch (e) {
-          console.error('Error deleting secondary app:', e);
-        }
-      }
       setCreatingAccount(false);
     }
   };
@@ -960,29 +938,28 @@ enum OperationType {
 
           if (changed) {
             const newProgress = calculateBadgeProgress(gradingSelectedBadge, stageReqs, newCompletedReqs, newScores);
-            const firestoreUpdates: Record<string, any> = {};
-            firestoreUpdates[`badges.${badgeKey}.progress`] = newProgress;
-            
-            // requirementScores
-            const origScores = currentBadge.requirementScores || {};
-            for (const req in newScores) {
-              if (newScores[req] !== origScores[req]) {
-                firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = newScores[req];
-              }
-            }
-            
-            // completedRequirements
-            const origCompleted = currentBadge.completedRequirements || [];
-            const added = newCompletedReqs.filter(r => !origCompleted.includes(r));
-            if (added.length > 0) {
-              firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayUnion(...added);
-            }
+
+            // Builds the whole new badge-slot object (this row already computed every
+            // field of it above), so this goes through update_badge_slot - the RPC
+            // meant for exactly this "full object for one slot" case - in a single
+            // atomic write per scout, same as the old single updateDoc call.
+            const newBadge: BadgeProgress = {
+              ...currentBadge,
+              progress: newProgress,
+              requirementScores: newScores,
+              completedRequirements: newCompletedReqs
+            };
 
             // NOTE (write reduction): this used to also write a per-scout entry to
             // activity_logs on every row of the imported sheet, doubling the writes
             // for what's already a bulk, routine grading action. Removed for the same
             // reason as the live grading tab - the data itself is still saved normally.
-            await updateDoc(doc(db, 'users', scout.uid), firestoreUpdates);
+            const { error } = await supabase.rpc('update_badge_slot', {
+              p_user_id: scout.uid,
+              p_slot: badgeKey,
+              p_badge: newBadge
+            });
+            if (error) throw error;
             updatedCount++;
           }
         }
@@ -1071,7 +1048,9 @@ enum OperationType {
           } else {
             const dateA = a.joinDate || a.createdAt;
             const dateB = b.joinDate || b.createdAt;
-            comparison = (dateA?.seconds || 0) - (dateB?.seconds || 0);
+            const timeA = dateA ? new Date(dateA).getTime() : 0;
+            const timeB = dateB ? new Date(dateB).getTime() : 0;
+            comparison = (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
           }
           return sortOrder === 'asc' ? comparison : -comparison;
         });
@@ -1124,12 +1103,18 @@ enum OperationType {
     setEditLoading(true);
     try {
       const originalScout = scouts.find(s => s.uid === editingScout.uid);
-      const firestoreUpdates: Record<string, any> = {};
+      const profileFieldUpdates: Record<string, any> = {};
+      // Badge slots that changed, to be written via update_badge_slot (the RPC for
+      // replacing a whole badge slot atomically) - one call per changed slot, keeping
+      // the blast radius of each write scoped to a single badge instead of the whole
+      // profile, mirroring the old field-path updateDoc's per-field precision.
+      const badgeSlotUpdates: { key: 'badge1' | 'badge2' | 'badge3'; badge: BadgeProgress }[] = [];
+      let hasChanges = false;
 
       if (originalScout) {
-        if (editForm.name !== originalScout.name) firestoreUpdates.name = editForm.name;
-        if (editForm.number !== originalScout.number) firestoreUpdates.number = editForm.number;
-        if (editForm.stage !== originalScout.stage) firestoreUpdates.stage = editForm.stage;
+        if (editForm.name !== originalScout.name) { profileFieldUpdates.name = editForm.name; hasChanges = true; }
+        if (editForm.number !== originalScout.number) { profileFieldUpdates.number = editForm.number; hasChanges = true; }
+        if (editForm.stage !== originalScout.stage) { profileFieldUpdates.stage = editForm.stage; hasChanges = true; }
 
         // Compare badges
         const badgeKeys: ('badge1' | 'badge2' | 'badge3')[] = ['badge1', 'badge2', 'badge3'];
@@ -1138,93 +1123,85 @@ enum OperationType {
           const newBadge = editingScout.badges[key];
 
           if (origBadge.name !== newBadge.name) {
-            firestoreUpdates[`badges.${key}.name`] = newBadge.name;
             // If badge name changed, reset progress
-            firestoreUpdates[`badges.${key}.progress`] = 0;
-            firestoreUpdates[`badges.${key}.completedRequirements`] = [];
-            firestoreUpdates[`badges.${key}.requirementScores`] = {};
-            firestoreUpdates[`badges.${key}.notes`] = '';
+            badgeSlotUpdates.push({ key, badge: { name: newBadge.name, progress: 0, notes: '', completedRequirements: [], requirementScores: {} } });
           } else {
-            if (origBadge.progress !== newBadge.progress) firestoreUpdates[`badges.${key}.progress`] = newBadge.progress;
-            if (origBadge.notes !== newBadge.notes) firestoreUpdates[`badges.${key}.notes`] = newBadge.notes;
-
-            // requirementScores
             const origScores = origBadge.requirementScores || {};
             const newScores = newBadge.requirementScores || {};
-            for (const req in newScores) {
-              if (newScores[req] !== origScores[req]) {
-                firestoreUpdates[`badges.${key}.requirementScores.${req}`] = newScores[req];
-              }
-            }
-            for (const req in origScores) {
-              if (!(req in newScores)) {
-                firestoreUpdates[`badges.${key}.requirementScores.${req}`] = deleteField();
-              }
-            }
+            const scoresChanged = Object.keys({ ...origScores, ...newScores }).some(req => origScores[req] !== newScores[req]);
 
-            // completedRequirements
             const origCompleted = origBadge.completedRequirements || [];
             const newCompleted = newBadge.completedRequirements || [];
-            const added = newCompleted.filter(r => !origCompleted.includes(r));
-            const removed = origCompleted.filter(r => !newCompleted.includes(r));
-            
-            if (added.length > 0 && removed.length === 0) {
-              firestoreUpdates[`badges.${key}.completedRequirements`] = arrayUnion(...added);
-            } else if (removed.length > 0 && added.length === 0) {
-              firestoreUpdates[`badges.${key}.completedRequirements`] = arrayRemove(...removed);
-            } else if (added.length > 0 && removed.length > 0) {
-              firestoreUpdates[`badges.${key}.completedRequirements`] = newCompleted;
+            const completedChanged = origCompleted.length !== newCompleted.length || origCompleted.some(r => !newCompleted.includes(r));
+
+            if (origBadge.progress !== newBadge.progress || origBadge.notes !== newBadge.notes || scoresChanged || completedChanged) {
+              badgeSlotUpdates.push({ key, badge: newBadge });
             }
           }
         });
       } else {
         // Fallback if original scout not found
-        firestoreUpdates.name = editForm.name;
-        firestoreUpdates.number = editForm.number;
-        firestoreUpdates.stage = editForm.stage;
-        firestoreUpdates.badges = editingScout.badges;
+        profileFieldUpdates.name = editForm.name;
+        profileFieldUpdates.number = editForm.number;
+        profileFieldUpdates.stage = editForm.stage;
+        (['badge1', 'badge2', 'badge3'] as const).forEach(key => {
+          badgeSlotUpdates.push({ key, badge: editingScout.badges[key] });
+        });
+        hasChanges = true;
       }
 
-      if (Object.keys(firestoreUpdates).length > 0) {
-        // If phone number changed, update it in Firebase Auth via API
-        if (firestoreUpdates.number) {
-          const user = auth.currentUser;
-          if (user) {
-            const adminToken = await user.getIdToken();
-            const response = await fetch('/api/admin/update-phone', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                uid: editingScout.uid, 
-                newPhone: firestoreUpdates.number,
-                adminToken 
-              })
-            });
-            if (!response.ok) {
-              let errorMsg = 'فشل تحديث رقم الهاتف في نظام الدخول';
+      if (badgeSlotUpdates.length > 0) hasChanges = true;
+
+      if (hasChanges) {
+        // If phone number changed, update it in Supabase Auth via API
+        if (profileFieldUpdates.number) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const adminToken = sessionData.session?.access_token;
+          const response = await fetch('/api/admin/update-phone', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              uid: editingScout.uid,
+              newPhone: profileFieldUpdates.number,
+              adminToken
+            })
+          });
+          if (!response.ok) {
+            let errorMsg = 'فشل تحديث رقم الهاتف في نظام الدخول';
+            try {
+              const rawText = await response.text();
               try {
-                const rawText = await response.text();
-                try {
-                  const errData = JSON.parse(rawText);
-                  console.error('Failed to update phone in Auth:', errData);
-                  if (errData.error && typeof errData.error === 'string' && errData.error.includes('email-already-exists')) {
-                    throw new Error('رقم الهاتف هذا مسجل لحساب آخر بالفعل');
-                  }
-                  errorMsg = typeof errData.error === 'string' ? errData.error : (errData.error?.message || errData.message || response.statusText);
-                } catch (e: any) {
-                  if (e.message === 'رقم الهاتف هذا مسجل لحساب آخر بالفعل') throw e;
-                  errorMsg = rawText || response.statusText;
+                const errData = JSON.parse(rawText);
+                console.error('Failed to update phone in Auth:', errData);
+                if (errData.error && typeof errData.error === 'string' && errData.error.includes('email-already-exists')) {
+                  throw new Error('رقم الهاتف هذا مسجل لحساب آخر بالفعل');
                 }
+                errorMsg = typeof errData.error === 'string' ? errData.error : (errData.error?.message || errData.message || response.statusText);
               } catch (e: any) {
                 if (e.message === 'رقم الهاتف هذا مسجل لحساب آخر بالفعل') throw e;
-                errorMsg = response.statusText;
+                errorMsg = rawText || response.statusText;
               }
-              throw new Error(errorMsg);
+            } catch (e: any) {
+              if (e.message === 'رقم الهاتف هذا مسجل لحساب آخر بالفعل') throw e;
+              errorMsg = response.statusText;
             }
+            throw new Error(errorMsg);
           }
         }
 
-        await updateDoc(doc(db, 'users', editingScout.uid), firestoreUpdates);
+        if (Object.keys(profileFieldUpdates).length > 0) {
+          const { error } = await supabase.from('profiles').update(profileFieldUpdates).eq('id', editingScout.uid);
+          if (error) throw error;
+        }
+
+        if (badgeSlotUpdates.length > 0) {
+          const results = await Promise.all(badgeSlotUpdates.map(({ key, badge }) =>
+            supabase.rpc('update_badge_slot', { p_user_id: editingScout.uid, p_slot: key, p_badge: badge })
+          ));
+          const failed = results.find(r => r.error);
+          if (failed?.error) throw failed.error;
+        }
+
         await logActivity(
           'تعديل بيانات',
           `تم تعديل بيانات المستخدم الأساسية`,
@@ -1234,7 +1211,7 @@ enum OperationType {
           editingScout.name
         );
       }
-      
+
       setMessage({ type: 'success', text: 'تم تحديث البيانات بنجاح' });
       if (closeAfterSave) {
         setEditingScout(null);
@@ -1263,11 +1240,10 @@ enum OperationType {
     });
   };
 
-  // Performs the actual Firestore write for one scout+badge, using whatever pending
-  // edits have accumulated for it. This is the same write logic as before (dot-notation
-  // updates, arrayUnion/arrayRemove for completedRequirements) - it just now runs once
-  // for a batch of merged edits instead of once per single edit, and no longer writes
-  // a separate activity_logs entry for this routine, high-frequency action.
+  // Performs the actual Supabase write for one scout+badge, using whatever pending
+  // edits have accumulated for it. It just now runs once for a batch of merged edits
+  // instead of once per single edit, and no longer writes a separate activity_logs
+  // entry for this routine, high-frequency action.
   const flushBadgeUpdate = async (key: string) => {
     const pending = pendingBadgeUpdatesRef.current[key];
     delete pendingBadgeTimersRef.current[key];
@@ -1277,62 +1253,50 @@ enum OperationType {
     const { scout, badgeKey, merged } = pending;
     try {
       const currentBadge = scout.badges[badgeKey];
+      const notesChanged = merged.notes !== undefined && merged.notes !== currentBadge.notes;
 
-      let newProgress = currentBadge.progress;
-      if (merged.requirementScores !== undefined || merged.completedRequirements !== undefined) {
+      if (merged.requirementScores !== undefined || notesChanged) {
+        // No dedicated RPC exists for setting requirementScores or notes on their own
+        // (only whole-slot replace via update_badge_slot, or arrayUnion/arrayRemove-style
+        // RPCs for completedRequirements) - so this replaces the whole slot atomically
+        // in one call, same blast radius as the old dot-path updateDoc call which also
+        // touched every field of this one badge together.
         const reqs = getScoutBadgeRequirements(currentBadge.name, scout.stage);
         const completedReqs = merged.completedRequirements !== undefined ? merged.completedRequirements : (currentBadge.completedRequirements || []);
         const scores = merged.requirementScores !== undefined ? merged.requirementScores : (currentBadge.requirementScores || {});
-        newProgress = calculateBadgeProgress(currentBadge.name, reqs, completedReqs, scores);
-      }
+        const newProgress = calculateBadgeProgress(currentBadge.name, reqs, completedReqs, scores);
 
-      const firestoreUpdates: Record<string, any> = {};
-
-      if (newProgress !== currentBadge.progress) {
-        firestoreUpdates[`badges.${badgeKey}.progress`] = newProgress;
-      }
-
-      if (merged.notes !== undefined && merged.notes !== currentBadge.notes) {
-        firestoreUpdates[`badges.${badgeKey}.notes`] = merged.notes;
-      }
-
-      if (merged.requirementScores !== undefined) {
-        const currentScores = currentBadge.requirementScores || {};
-        const newScores = merged.requirementScores;
-
-        for (const req in newScores) {
-          if (newScores[req] !== currentScores[req]) {
-            firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = newScores[req];
-          }
-        }
-        for (const req in currentScores) {
-          if (!(req in newScores)) {
-            firestoreUpdates[`badges.${badgeKey}.requirementScores.${req}`] = deleteField();
-          }
-        }
-      }
-
-      if (merged.completedRequirements !== undefined) {
+        const newBadge: BadgeProgress = {
+          name: currentBadge.name,
+          progress: newProgress,
+          notes: merged.notes !== undefined ? merged.notes : currentBadge.notes,
+          completedRequirements: completedReqs,
+          requirementScores: scores
+        };
+        const { error } = await supabase.rpc('update_badge_slot', { p_user_id: scout.uid, p_slot: badgeKey, p_badge: newBadge });
+        if (error) throw error;
+      } else if (merged.completedRequirements !== undefined) {
+        // Pure checkbox toggles: use the same arrayUnion/arrayRemove-equivalent RPCs
+        // used elsewhere in this file, so this can't clobber a concurrent admin's edit
+        // to a different requirement on the same badge.
         const currentCompleted = currentBadge.completedRequirements || [];
         const newCompleted = merged.completedRequirements;
-
         const added = newCompleted.filter(r => !currentCompleted.includes(r));
         const removed = currentCompleted.filter(r => !newCompleted.includes(r));
 
-        if (added.length > 0 && removed.length === 0) {
-           firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayUnion(...added);
-        } else if (removed.length > 0 && added.length === 0) {
-           firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = arrayRemove(...removed);
-        } else if (added.length > 0 && removed.length > 0) {
-           firestoreUpdates[`badges.${badgeKey}.completedRequirements`] = newCompleted;
-        }
-      }
+        const ops = [
+          ...added.map(req => supabase.rpc('add_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req })),
+          ...removed.map(req => supabase.rpc('remove_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req }))
+        ];
 
-      if (Object.keys(firestoreUpdates).length === 0) {
+        if (ops.length === 0) return;
+        const results = await Promise.all(ops);
+        const failed = results.find(r => r.error);
+        if (failed?.error) throw failed.error;
+      } else {
         return;
       }
 
-      await updateDoc(doc(db, 'users', scout.uid), firestoreUpdates);
       setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
@@ -1396,7 +1360,8 @@ enum OperationType {
     };
     const updatedCategories = [...(badgeSettings.categories || []), newCategory];
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, categories: updatedCategories });
+      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      if (error) throw error;
       setNewCategoryName('');
       setMessage({ type: 'success', text: 'تم إضافة التصنيف بنجاح' });
     } catch (error) {
@@ -1408,7 +1373,8 @@ enum OperationType {
     if (!window.confirm('هل أنت متأكد من حذف هذا التصنيف؟')) return;
     const updatedCategories = (badgeSettings.categories || []).filter(c => c.id !== categoryId);
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, categories: updatedCategories });
+      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      if (error) throw error;
       setMessage({ type: 'success', text: 'تم حذف التصنيف بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -1424,7 +1390,8 @@ enum OperationType {
       return c;
     });
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, categories: updatedCategories });
+      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      if (error) throw error;
       setRenamingCategoryId(null);
       setRenamingCategoryName('');
       setMessage({ type: 'success', text: 'تم إعادة تسمية التصنيف بنجاح' });
@@ -1448,7 +1415,8 @@ enum OperationType {
       return c;
     });
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, categories: updatedCategories });
+      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      if (error) throw error;
       setNewBadgeForCategory('');
       setMessage({ type: 'success', text: 'تم إضافة الشارة بنجاح' });
     } catch (error) {
@@ -1473,7 +1441,8 @@ enum OperationType {
       return c;
     });
     try {
-      await setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, categories: updatedCategories });
+      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      if (error) throw error;
       setMessage({ type: 'success', text: 'تم حذف الشارة بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -1481,13 +1450,16 @@ enum OperationType {
   };
 
   // NOTE (fix): These four functions used to read the whole `badgeSettings` object from local
-  // state and re-save it in full with `setDoc`. Because local state can be a few hundred
-  // milliseconds behind the server (it updates via onSnapshot), two admins editing at the same
-  // time -- or even one admin clicking "add" twice quickly -- could silently overwrite each
-  // other's changes with a stale copy of the document. They now use `updateDoc` with specific
-  // field paths (and `arrayUnion`/`arrayRemove` for the requirement lists), so each change only
-  // touches its own piece of data and can no longer erase someone else's edit. They also now
-  // write an entry to activity_logs so changes are traceable.
+  // state and re-save it in full. Because local state can lag the server by a poll interval,
+  // two admins editing at the same time -- or even one admin clicking "add" twice quickly --
+  // could silently overwrite each other's changes with a stale copy. They now only patch the
+  // `categories` key via `merge_app_settings` (a shallow merge at the top level of the settings
+  // row), so a change here can no longer erase edits made to `requirements`/`groupLinks`/etc. by
+  // someone else in between. They also now write an entry to activity_logs so changes are
+  // traceable. Note merge_app_settings' merge is shallow (only at the top-level jsonb keys named
+  // in the patch) - unlike Firestore's deep merge, so any function below that touches a nested
+  // per-badge key (`requirements`, `requirementCategories`, `requirementMaxScores`) always
+  // rebuilds and sends the FULL object for that top-level key, not just the one badge's slice.
 
   const handleQueueRequirement = (badgeName: string, req: string, stages: Stage[] | 'all' = 'all', category: string = 'عام', score: string = '') => {
     const trimmedReq = req.trim();
@@ -1515,44 +1487,47 @@ enum OperationType {
     const badgePending = pendingRequirements.filter(p => p.badgeName === badgeName);
     if (badgePending.length === 0) return;
 
-    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
-    const badgeDocRef = doc(db, 'settings', 'badges');
-
     try {
-      if (Array.isArray(currentBadgeReqs)) {
-        await setDoc(badgeDocRef, {
-          requirements: {
-            [badgeName]: { all: currentBadgeReqs }
-          }
-        }, { merge: true });
-      }
+      const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+      // Migrate legacy array-shaped requirements (no per-stage breakdown) into the
+      // stage-keyed object shape before adding new stage-scoped requirements.
+      const badgeReqsObj: Partial<Record<Stage | 'all', string[]>> = Array.isArray(currentBadgeReqs)
+        ? { all: [...currentBadgeReqs] }
+        : { ...currentBadgeReqs };
 
-      const updates: Record<string, any> = {
-        requirements: { [badgeName]: {} },
-        requirementCategories: { [badgeName]: {} },
-        requirementMaxScores: { [badgeName]: {} }
-      };
+      const requirementCategories = { ...(badgeSettings.requirementCategories || {}) };
+      const badgeCategories = { ...(requirementCategories[badgeName] || {}) };
+      const requirementMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+      const badgeMaxScores = { ...(requirementMaxScores[badgeName] || {}) };
 
       badgePending.forEach(p => {
         const stageKeys: (Stage | 'all')[] = p.stages === 'all' ? ['all'] : p.stages;
         stageKeys.forEach(stageKey => {
-          if (!updates.requirements[badgeName][stageKey]) {
-            updates.requirements[badgeName][stageKey] = [];
+          const existing = badgeReqsObj[stageKey] || [];
+          if (!existing.includes(p.req)) {
+            badgeReqsObj[stageKey] = [...existing, p.req];
           }
-          updates.requirements[badgeName][stageKey].push(p.req);
         });
 
-        updates.requirementCategories[badgeName][p.req] = p.category;
+        badgeCategories[p.req] = p.category;
         if (p.score && !isNaN(parseInt(p.score))) {
-          updates.requirementMaxScores[badgeName][p.req] = parseInt(p.score);
+          badgeMaxScores[p.req] = parseInt(p.score);
         }
       });
 
-      for (const stageKey in updates.requirements[badgeName]) {
-        updates.requirements[badgeName][stageKey] = arrayUnion(...updates.requirements[badgeName][stageKey]);
-      }
+      requirementCategories[badgeName] = badgeCategories;
+      requirementMaxScores[badgeName] = badgeMaxScores;
+      // merge_app_settings only shallow-merges at the top level of the settings row's
+      // jsonb value, so `requirements` must be sent in full (every badge), not just
+      // this one badge's slice - otherwise every other badge's requirements would be
+      // wiped out.
+      const requirements = { ...(badgeSettings.requirements || {}), [badgeName]: badgeReqsObj };
 
-      await setDoc(badgeDocRef, updates, { merge: true });
+      const { error } = await supabase.rpc('merge_app_settings', {
+        p_key: 'badges',
+        p_patch: { requirements, requirementCategories, requirementMaxScores }
+      });
+      if (error) throw error;
 
       setPendingRequirements(prev => prev.filter(p => p.badgeName !== badgeName));
       setNewRequirementCategory('');
@@ -1576,65 +1551,48 @@ enum OperationType {
     const { badgeName, oldText, newText, category, stage, maxScore } = editingRequirement;
     const trimmedNew = newText.trim();
     const textChanged = oldText !== trimmedNew;
-    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
-    const badgeDocRef = doc(db, 'settings', 'badges');
 
     try {
-      if (Array.isArray(currentBadgeReqs)) {
-        await setDoc(badgeDocRef, {
-          requirements: {
-            [badgeName]: { all: currentBadgeReqs }
-          }
-        }, { merge: true });
-      }
-
-      const updates: Record<string, any> = {
-        requirements: {
-          [badgeName]: {}
-        },
-        requirementCategories: {
-          [badgeName]: {}
-        },
-        requirementMaxScores: {
-          [badgeName]: {}
-        }
-      };
+      const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+      const badgeReqsObj: Partial<Record<Stage | 'all', string[]>> = Array.isArray(currentBadgeReqs)
+        ? { all: [...currentBadgeReqs] }
+        : { ...currentBadgeReqs };
 
       if (textChanged) {
-        updates.requirements[badgeName][stage] = arrayRemove(oldText);
+        badgeReqsObj[stage] = [...(badgeReqsObj[stage] || []).filter(r => r !== oldText), trimmedNew];
       }
 
-      updates.requirementCategories[badgeName][trimmedNew] = category.trim() || 'عام';
+      const requirementCategories = { ...(badgeSettings.requirementCategories || {}) };
+      const badgeCategories = { ...(requirementCategories[badgeName] || {}) };
+      badgeCategories[trimmedNew] = category.trim() || 'عام';
       if (textChanged) {
-        updates.requirementCategories[badgeName][oldText] = deleteField();
+        delete badgeCategories[oldText];
       }
+      requirementCategories[badgeName] = badgeCategories;
 
       // Carry over the old max score to the new text unless a new one was explicitly provided.
+      const requirementMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+      const badgeMaxScores = { ...(requirementMaxScores[badgeName] || {}) };
       const existingMaxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[oldText];
       const newMaxScoreValue = (maxScore && !isNaN(parseInt(maxScore)))
         ? parseInt(maxScore)
         : existingMaxScore;
 
       if (newMaxScoreValue !== undefined) {
-        updates.requirementMaxScores[badgeName][trimmedNew] = newMaxScoreValue;
+        badgeMaxScores[trimmedNew] = newMaxScoreValue;
       }
       if (textChanged && existingMaxScore !== undefined) {
-        updates.requirementMaxScores[badgeName][oldText] = deleteField();
+        delete badgeMaxScores[oldText];
       }
+      requirementMaxScores[badgeName] = badgeMaxScores;
 
-      await setDoc(badgeDocRef, updates, { merge: true });
+      const requirements = { ...(badgeSettings.requirements || {}), [badgeName]: badgeReqsObj };
 
-      // Adding the new text has to happen after the old one is removed, and arrayUnion/arrayRemove
-      // can't target the same field path in one call, so it's done as a second, separate update.
-      if (textChanged) {
-        await setDoc(badgeDocRef, {
-          requirements: {
-            [badgeName]: {
-              [stage]: arrayUnion(trimmedNew)
-            }
-          }
-        }, { merge: true });
-      }
+      const { error } = await supabase.rpc('merge_app_settings', {
+        p_key: 'badges',
+        p_patch: { requirements, requirementCategories, requirementMaxScores }
+      });
+      if (error) throw error;
 
       setEditingRequirement(null);
       setMessage({ type: 'success', text: 'تم تعديل البند بنجاح' });
@@ -1653,25 +1611,16 @@ enum OperationType {
   const handleRemoveRequirement = async (badgeName: string, req: string, stage: Stage | 'all' = 'all') => {
     if (!window.confirm('هل أنت متأكد من حذف هذا البند؟')) return;
 
-    const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
-    const badgeDocRef = doc(db, 'settings', 'badges');
-
     try {
-      if (Array.isArray(currentBadgeReqs)) {
-        await setDoc(badgeDocRef, {
-          requirements: {
-            [badgeName]: { all: currentBadgeReqs }
-          }
-        }, { merge: true });
-      }
+      const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+      const badgeReqsObj: Partial<Record<Stage | 'all', string[]>> = Array.isArray(currentBadgeReqs)
+        ? { all: [...currentBadgeReqs] }
+        : { ...currentBadgeReqs };
+      badgeReqsObj[stage] = (badgeReqsObj[stage] || []).filter(r => r !== req);
+      const requirements = { ...(badgeSettings.requirements || {}), [badgeName]: badgeReqsObj };
 
-      await setDoc(badgeDocRef, {
-        requirements: {
-          [badgeName]: {
-            [stage]: arrayRemove(req)
-          }
-        }
-      }, { merge: true });
+      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirements } });
+      if (error) throw error;
 
       setMessage({ type: 'success', text: 'تم حذف البند بنجاح' });
 
@@ -1688,13 +1637,11 @@ enum OperationType {
 
   const handleSetRequirementMaxScore = async (badgeName: string, req: string, maxScore: number) => {
     try {
-      await setDoc(doc(db, 'settings', 'badges'), {
-        requirementMaxScores: {
-          [badgeName]: {
-            [req]: maxScore
-          }
-        }
-      }, { merge: true });
+      const requirementMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+      requirementMaxScores[badgeName] = { ...(requirementMaxScores[badgeName] || {}), [req]: maxScore };
+
+      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirementMaxScores } });
+      if (error) throw error;
       setMessage({ type: 'success', text: 'تم تحديث الدرجة النهائية للبند بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -1713,10 +1660,10 @@ enum OperationType {
 
     setIsDeletingAuth(true);
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('يجب تسجيل الدخول كمسؤول');
+      const { data: sessionData } = await supabase.auth.getSession();
+      const adminToken = sessionData.session?.access_token;
+      if (!adminToken) throw new Error('يجب تسجيل الدخول كمسؤول');
 
-      const adminToken = await user.getIdToken();
       const response = await fetch('/api/admin/delete-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1843,9 +1790,11 @@ enum OperationType {
 
     setEditLoading(true);
     try {
-      await updateDoc(doc(db, 'users', editingPermissionsFor.uid), {
-        permissions: permissionsForm
+      const { error } = await supabase.rpc('update_permissions', {
+        p_user_id: editingPermissionsFor.uid,
+        p_permissions: permissionsForm
       });
+      if (error) throw error;
       await logActivity(
         'تحديث صلاحيات',
         `تم تحديث صلاحيات المستخدم`,
@@ -1873,7 +1822,8 @@ enum OperationType {
     if (!window.confirm(`هل أنت متأكد من ${actionText} لهذا المستخدم؟`)) return false;
 
     try {
-      await updateDoc(doc(db, 'users', scoutId), { role: newRole });
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', scoutId);
+      if (error) throw error;
       const targetScout = scouts.find(s => s.uid === scoutId);
       await logActivity(
         'تغيير دور',
@@ -1901,15 +1851,16 @@ enum OperationType {
     setDeleteLoading(true);
     try {
       // 1. Write custom log to deleted_accounts_logs
-      await setDoc(doc(collection(db, 'deleted_accounts_logs')), {
-        deletedScoutNumber: deletingScout.number || 'بدون رقم',
-        deletedByUid: currentProfile.uid,
-        deletedByName: currentProfile.name || 'مسؤول',
-        timestamp: serverTimestamp()
+      const { error: logError } = await supabase.from('deleted_accounts_logs').insert({
+        deleted_scout_number: deletingScout.number || 'بدون رقم',
+        deleted_by: currentProfile.uid,
+        deleted_by_name: currentProfile.name || 'مسؤول'
       });
+      if (logError) throw logError;
 
-      // 2. Delete from Firestore
-      await deleteDoc(doc(db, 'users', deletingScout.uid));
+      // 2. Delete from Supabase
+      const { error: deleteError } = await supabase.from('profiles').delete().eq('id', deletingScout.uid);
+      if (deleteError) throw deleteError;
       await logActivity(
         'حذف حساب',
         `تم حذف حساب المستخدم`,
@@ -1918,11 +1869,11 @@ enum OperationType {
         deletingScout.uid,
         'حساب محذوف'
       );
-      
-      // 3. Try to delete from Firebase Authentication via our backend API
-      const user = auth.currentUser;
-      if (user) {
-        const adminToken = await user.getIdToken();
+
+      // 3. Try to delete from Supabase Auth via our backend API
+      const { data: sessionData } = await supabase.auth.getSession();
+      const adminToken = sessionData.session?.access_token;
+      if (adminToken) {
         try {
           const response = await fetch('/api/admin/delete-user', {
             method: 'POST',
@@ -1963,7 +1914,8 @@ enum OperationType {
     if (!isSuperAdmin) return;
     if (!window.confirm('هل أنت متأكد من حذف هذا السجل؟')) return;
     try {
-      await deleteDoc(doc(db, 'activity_logs', logId));
+      const { error } = await supabase.from('activity_logs').delete().eq('id', logId);
+      if (error) throw error;
       setMessage({ type: 'success', text: 'تم حذف السجل بنجاح' });
     } catch (error) {
       handleFirestoreError(error, 'delete', `activity_logs/${logId}`);
@@ -1974,10 +1926,11 @@ enum OperationType {
     if (!isSuperAdmin || selectedLogs.length === 0) return;
     if (!window.confirm(`هل أنت متأكد من حذف ${selectedLogs.length} سجل(ات)؟`)) return;
     try {
-      // In a real production scenario with many records, you'd use a batch. 
-      // Doing it sequentially here since logs amount might not be that huge or batch limits might be hit.
-      // Better to use batch, but for simplicity we can promise.all
-      await Promise.all(selectedLogs.map(logId => deleteDoc(doc(db, 'activity_logs', logId))));
+      // No cross-row atomic batch available in Postgres from the client, so this
+      // deletes each row independently via Promise.all (accepted, known limitation).
+      const results = await Promise.all(selectedLogs.map(logId => supabase.from('activity_logs').delete().eq('id', logId)));
+      const failed = results.find(r => r.error);
+      if (failed?.error) throw failed.error;
       setMessage({ type: 'success', text: 'تم حذف السجلات بنجاح' });
       setSelectedLogs([]);
     } catch (error) {
@@ -1993,7 +1946,9 @@ enum OperationType {
     if (!window.confirm(`هل أنت متأكد من حذف ${logsToDelete.length} سجل(ات) معروضة حاليا؟ هذا الإجراء لا يمكن التراجع عنه.`)) return;
 
     try {
-      await Promise.all(logsToDelete.map(log => deleteDoc(doc(db, 'activity_logs', log.id))));
+      const results = await Promise.all(logsToDelete.map(log => supabase.from('activity_logs').delete().eq('id', log.id)));
+      const failed = results.find(r => r.error);
+      if (failed?.error) throw failed.error;
       setMessage({ type: 'success', text: 'تم حذف السجلات بنجاح' });
       setSelectedLogs([]);
     } catch (error) {
@@ -2034,10 +1989,10 @@ enum OperationType {
 
     setPasswordLoading(true);
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('User not authenticated');
-      
-      const adminToken = await user.getIdToken();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const adminToken = sessionData.session?.access_token;
+      if (!adminToken) throw new Error('User not authenticated');
+
       const response = await fetch('/api/admin/update-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2092,11 +2047,12 @@ enum OperationType {
   const filteredActivityLogs = useMemo(() => {
     return activityLogs.filter(log => !log.action.includes('غياب') && !log.action.includes('حضور')).filter(log => {
       if (!logDateFilter) return true;
-      if (!log.timestamp?.toDate) return false;
-      const logDate = log.timestamp.toDate();
+      if (!log.timestamp) return false;
+      const logDate = new Date(log.timestamp);
+      if (isNaN(logDate.getTime())) return false;
       const [y, m, d] = logDateFilter.split('-');
-      return logDate.getFullYear() === parseInt(y, 10) && 
-             logDate.getMonth() === parseInt(m, 10) - 1 && 
+      return logDate.getFullYear() === parseInt(y, 10) &&
+             logDate.getMonth() === parseInt(m, 10) - 1 &&
              logDate.getDate() === parseInt(d, 10);
     });
   }, [activityLogs, logDateFilter]);
@@ -2453,9 +2409,11 @@ enum OperationType {
                                       };
                                       
                                       try {
-                                        await updateDoc(doc(db, 'settings', 'badges'), { 
-                                          groupLinks: newGroupLinks 
+                                        const { error } = await supabase.rpc('merge_app_settings', {
+                                          p_key: 'badges',
+                                          p_patch: { groupLinks: newGroupLinks }
                                         });
+                                        if (error) throw error;
                                         setMessage({ type: 'success', text: 'تم حفظ الرابط بنجاح' });
                                       } catch (error) {
                                         handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -2904,7 +2862,7 @@ enum OperationType {
                               </td>
                             )}
                             <td className="p-4 text-sm text-gray-600 whitespace-nowrap">
-                              {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-EG', {
+                              {log.timestamp ? new Date(log.timestamp).toLocaleString('ar-EG', {
                                 year: 'numeric',
                                 month: '2-digit',
                                 day: '2-digit',
@@ -2953,9 +2911,9 @@ enum OperationType {
                         onClick={async () => {
                           if (window.confirm(`هل أنت متأكد من حذف ${selectedDeletedLogs.length} سجل محذوف؟`)) {
                             try {
-                              for (const id of selectedDeletedLogs) {
-                                await deleteDoc(doc(db, 'deleted_accounts_logs', id));
-                              }
+                              const results = await Promise.all(selectedDeletedLogs.map(id => supabase.from('deleted_accounts_logs').delete().eq('id', id)));
+                              const failed = results.find(r => r.error);
+                              if (failed?.error) throw failed.error;
                               setSelectedDeletedLogs([]);
                               setMessage({ type: 'success', text: 'تم حذف السجلات المحددة بنجاح' });
                             } catch (error) {
@@ -2973,11 +2931,12 @@ enum OperationType {
                       onClick={async () => {
                         if (window.confirm('هل أنت متأكد من حذف جميع سجلات الحسابات المحذوفة نهائياً؟')) {
                           try {
-                            const batch = writeBatch(db);
-                            deletedAccountsLogs.forEach(log => {
-                              batch.delete(doc(db, 'deleted_accounts_logs', log.id));
-                            });
-                            await batch.commit();
+                            // No cross-row atomic batch available in Postgres from the client -
+                            // deletes each row independently via Promise.all (accepted, known
+                            // limitation of the Firestore -> Supabase migration).
+                            const results = await Promise.all(deletedAccountsLogs.map(log => supabase.from('deleted_accounts_logs').delete().eq('id', log.id)));
+                            const failed = results.find(r => r.error);
+                            if (failed?.error) throw failed.error;
                             setSelectedDeletedLogs([]);
                             setMessage({ type: 'success', text: 'تم حذف جميع السجلات بنجاح' });
                           } catch (error) {
@@ -3048,7 +3007,7 @@ enum OperationType {
                               </td>
                             )}
                             <td className="p-4 text-sm text-gray-600 whitespace-nowrap">
-                              {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-EG', {
+                              {log.timestamp ? new Date(log.timestamp).toLocaleString('ar-EG', {
                                 year: 'numeric',
                                 month: '2-digit',
                                 day: '2-digit',
@@ -3063,7 +3022,8 @@ enum OperationType {
                                 <button
                                   onClick={async () => {
                                     try {
-                                      await deleteDoc(doc(db, 'deleted_accounts_logs', log.id));
+                                      const { error } = await supabase.from('deleted_accounts_logs').delete().eq('id', log.id);
+                                      if (error) throw error;
                                       setMessage({ type: 'success', text: 'تم حذف السجل بنجاح' });
                                     } catch (error) {
                                       setMessage({ type: 'error', text: 'حدث خطأ أثناء حذف السجل' });
@@ -3172,9 +3132,11 @@ enum OperationType {
                     <button
                       onClick={async () => {
                         try {
-                          await setDoc(doc(db, 'settings', 'general'), {
-                            scoutGroupName: generalSettings.scoutGroupName
-                          }, { merge: true });
+                          const { error } = await supabase.rpc('merge_app_settings', {
+                            p_key: 'general',
+                            p_patch: { scoutGroupName: generalSettings.scoutGroupName }
+                          });
+                          if (error) throw error;
                           setMessage({ type: 'success', text: 'تم حفظ اسم المجموعة بنجاح' });
                         } catch (error) {
                           console.error('Error updating group name:', error);
@@ -3200,9 +3162,8 @@ enum OperationType {
                         value={generalSettings.activeWave || 'wave1'}
                         onChange={async (e) => {
                           const val = e.target.value as 'wave1' | 'wave2';
-                          await setDoc(doc(db, 'settings', 'general'), {
-                            activeWave: val
-                          }, { merge: true });
+                          const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { activeWave: val } });
+                          if (error) console.error('Error updating active wave:', error);
                         }}
                         className="px-4 py-2 rounded-xl border border-purple-200 outline-none font-bold text-sm bg-white"
                       >
@@ -3221,9 +3182,8 @@ enum OperationType {
                           type="checkbox"
                           checked={generalSettings.showResults || false}
                           onChange={async (e) => {
-                            await setDoc(doc(db, 'settings', 'general'), {
-                              showResults: e.target.checked
-                            }, { merge: true });
+                            const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { showResults: e.target.checked } });
+                            if (error) console.error('Error updating showResults:', error);
                           }}
                           className="sr-only peer"
                         />
@@ -3384,9 +3344,11 @@ enum OperationType {
                                 : currentAllowed.filter(s => s !== stage);
                               
                               try {
-                                await setDoc(doc(db, 'settings', 'general'), {
-                                  allowedRegistrationStages: newAllowed
-                                }, { merge: true });
+                                const { error } = await supabase.rpc('merge_app_settings', {
+                                  p_key: 'general',
+                                  p_patch: { allowedRegistrationStages: newAllowed }
+                                });
+                                if (error) throw error;
                               } catch (error) {
                                 console.error('Error updating allowed stages:', error);
                                 alert('حدث خطأ أثناء تحديث الإعدادات');
@@ -3423,7 +3385,8 @@ enum OperationType {
                         if (newPrice > 99) newPrice = 99;
                         setGeneralSettings(prev => ({ ...prev, badgePrice: newPrice }));
                         try {
-                          await setDoc(doc(db, 'settings', 'general'), { badgePrice: newPrice }, { merge: true });
+                          const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { badgePrice: newPrice } });
+                          if (error) throw error;
                         } catch (error) {
                           handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
                         }
@@ -3456,7 +3419,8 @@ enum OperationType {
                           }
                           const newDates = [...dates, newAttendanceDate].sort();
                           try {
-                            await setDoc(doc(db, 'settings', 'general'), { attendanceDates: newDates }, { merge: true });
+                            const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { attendanceDates: newDates } });
+                            if (error) throw error;
                             setNewAttendanceDate('');
                           } catch (error) {
                             handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
@@ -3547,7 +3511,8 @@ enum OperationType {
                                     if (window.confirm('هل أنت متأكد من حذف هذا اليوم؟')) {
                                       const newDates = (generalSettings.attendanceDates || []).filter(d => d !== date);
                                       try {
-                                        await setDoc(doc(db, 'settings', 'general'), { attendanceDates: newDates }, { merge: true });
+                                        const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { attendanceDates: newDates } });
+                                        if (error) throw error;
                                       } catch (error) {
                                         handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
                                       }
@@ -3593,7 +3558,8 @@ enum OperationType {
                                     value={amountPaid || 0}
                                     onChange={async (e) => {
                                       try {
-                                        await updateDoc(doc(db, 'users', scout.uid), { amountPaid: Number(e.target.value) });
+                                        const { error } = await supabase.from('profiles').update({ amount_paid: Number(e.target.value) }).eq('id', scout.uid);
+                                        if (error) throw error;
                                         await logActivity(
                                           'تحديث اشتراك',
                                           `تم تحديث المبلغ المدفوع إلى ${e.target.value}`,
@@ -3622,9 +3588,8 @@ enum OperationType {
                                   checked={scout.attendance?.[date] || false}
                                   onChange={async (e) => {
                                     try {
-                                      await updateDoc(doc(db, 'users', scout.uid), {
-                                        [`attendance.${date}`]: e.target.checked
-                                      });
+                                      const { error } = await supabase.rpc('set_attendance', { p_user_id: scout.uid, p_date: date, p_present: e.target.checked });
+                                      if (error) throw error;
                                       await logActivity(
                                         'تسجيل غياب',
                                         `تم ${e.target.checked ? 'تسجيل حضور' : 'إلغاء حضور'} ليوم ${date}`,
@@ -3804,30 +3769,34 @@ enum OperationType {
                     />
                     <button
                       disabled={!quickScoreGlobalValue}
-                      onClick={() => {
+                      onClick={async () => {
                         const score = parseInt(quickScoreGlobalValue);
                         if(isNaN(score)) return;
-                        
+
                         const allReqsForBadge = new Set<string>();
                         STAGES.forEach(stage => {
                           getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage).forEach(r => allReqsForBadge.add(r));
                         });
-                        
+
                         const updatedMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
                         const badgeScores = { ...(updatedMaxScores[gradingSelectedBadge] || {}) };
-                        
+
                         allReqsForBadge.forEach(req => {
                           badgeScores[req] = score;
                         });
-                        
+
                         updatedMaxScores[gradingSelectedBadge] = badgeScores;
-                        
-                        setDoc(doc(db, 'settings', 'badges'), { ...badgeSettings, requirementMaxScores: updatedMaxScores })
-                          .then(() => {
-                             setMessage({ type: 'success', text: 'تم توحيد الدرجات بنجاح' });
-                             setQuickScoreGlobalValue('');
-                          })
-                          .catch(() => setMessage({ type: 'error', text: 'حدث خطأ أثناء توحيد الدرجات' }));
+
+                        const { error } = await supabase.rpc('merge_app_settings', {
+                          p_key: 'badges',
+                          p_patch: { requirementMaxScores: updatedMaxScores }
+                        });
+                        if (error) {
+                          setMessage({ type: 'error', text: 'حدث خطأ أثناء توحيد الدرجات' });
+                        } else {
+                          setMessage({ type: 'success', text: 'تم توحيد الدرجات بنجاح' });
+                          setQuickScoreGlobalValue('');
+                        }
                       }}
                       className="flex-1 px-4 py-3 bg-[#4285F4] text-white rounded-xl hover:bg-blue-600 transition-colors font-bold text-sm disabled:opacity-50"
                     >

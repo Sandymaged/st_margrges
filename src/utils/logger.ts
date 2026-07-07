@@ -1,24 +1,21 @@
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabaseClient';
 
 export const logActivity = async (
   action: string,
   details: string,
-  adminId: string,
-  adminName: string,
+  _adminId: string,
+  _adminName: string,
   targetUserId?: string,
   targetUserName?: string
 ) => {
   try {
-    await addDoc(collection(db, 'activity_logs'), {
-      action,
-      details,
-      adminId,
-      adminName,
-      targetUserId: targetUserId || null,
-      targetUserName: targetUserName || null,
-      timestamp: serverTimestamp()
+    const { error } = await supabase.rpc('log_activity', {
+      p_action: action,
+      p_details: details,
+      p_target_user_id: targetUserId || null,
+      p_target_user_name: targetUserName || null,
     });
+    if (error) throw error;
   } catch (error) {
     console.error('Failed to log activity:', error);
   }

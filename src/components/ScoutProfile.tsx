@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ScoutProfile, BadgeSettings, GeneralSettings } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
 import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle, Award, Trash2, Smartphone, X, Share2, MoreVertical, PlusSquare, Info } from 'lucide-react';
-import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabaseClient';
+import { usePolling } from '../lib/usePolling';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -77,42 +77,41 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
     setShowInstallBanner(false);
   };
 
-  useEffect(() => {
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'badges'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setBadgeSettings({
-          categories: data.categories || [],
-          requirements: data.requirements || {},
-          requirementMaxScores: data.requirementMaxScores || {},
-          requirementCategories: data.requirementCategories || {},
-          groupLinks: data.groupLinks || {}
-        });
-      }
-    }, (error) => {
-      console.warn("Failed to fetch badges settings:", error);
-    });
+  usePolling(async () => {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
+    if (error) {
+      console.warn('Failed to fetch badges settings:', error);
+      return;
+    }
+    const value = data?.value as any;
+    if (value) {
+      setBadgeSettings({
+        categories: value.categories || [],
+        requirements: value.requirements || {},
+        requirementMaxScores: value.requirementMaxScores || {},
+        requirementCategories: value.requirementCategories || {},
+        groupLinks: value.groupLinks || {}
+      });
+    }
+  }, 10000);
 
-    const unsubGeneral = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as GeneralSettings;
-        setGeneralSettings({
-          ...data,
-          logoUrl: '/syncc.png',
-          scoutGroupName: data.scoutGroupName || 'مجموعة مارجرجس الكشفية',
-          badgePrice: data.badgePrice || 30,
-          attendanceDates: data.attendanceDates || []
-        });
-      }
-    }, (error) => {
-      console.warn("Failed to fetch general settings:", error);
-    });
-    
-    return () => {
-      unsubSettings();
-      unsubGeneral();
-    };
-  }, [profile.uid]);
+  usePolling(async () => {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
+    if (error) {
+      console.warn('Failed to fetch general settings:', error);
+      return;
+    }
+    const value = data?.value as GeneralSettings | undefined;
+    if (value) {
+      setGeneralSettings({
+        ...value,
+        logoUrl: '/syncc.png',
+        scoutGroupName: value.scoutGroupName || 'مجموعة مارجرجس الكشفية',
+        badgePrice: value.badgePrice || 30,
+        attendanceDates: value.attendanceDates || []
+      });
+    }
+  }, 10000);
 
   const handleCancelBadgeRequest = (badgeKey: 'badge1' | 'badge2' | 'badge3', badgeName: string) => {
     setCancelBadgeConfirm({ key: badgeKey, name: badgeName });
@@ -128,17 +127,12 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
     }
 
     try {
-      const userRef = doc(db, 'users', profile.uid);
-      const updatedBadges = { ...profile.badges };
-      
-      // Remove the badge data
-      updatedBadges[cancelBadgeConfirm.key] = {
-        name: '',
-        completedRequirements: [],
-        requirementScores: {}
-      };
-
-      await updateDoc(userRef, { badges: updatedBadges });
+      const { error } = await supabase.rpc('update_badge_slot', {
+        p_user_id: profile.uid,
+        p_slot: cancelBadgeConfirm.key,
+        p_badge: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} },
+      });
+      if (error) throw error;
       setCancelBadgeConfirm(null);
       alert('تم إلغاء الشارة بنجاح');
     } catch (error) {
@@ -251,9 +245,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
 
   const handleDismissWelcome = async () => {
     try {
-      await updateDoc(doc(db, 'users', profile.uid), {
-        showWelcomeGroups: false
-      });
+      const { error } = await supabase.rpc('dismiss_welcome_groups');
+      if (error) throw error;
     } catch (error) {
       console.error('Error dismissing welcome modal:', error);
     }
@@ -569,13 +562,15 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-gray-700"
                 onChange={async (e) => {
                   if (!e.target.value) return;
-                  const newBadge = { name: e.target.value, progress: 0, notes: '' };
-                  const updatedBadges = { ...profile.badges };
-                  if (!updatedBadges.badge1.name) updatedBadges.badge1 = newBadge;
-                  else if (!updatedBadges.badge2.name) updatedBadges.badge2 = newBadge;
-                  else updatedBadges.badge3 = newBadge;
-                  
-                  await updateDoc(doc(db, 'users', profile.uid), { badges: updatedBadges });
+                  const newBadge = { name: e.target.value, progress: 0, notes: '', completedRequirements: [] };
+                  const slot = !profile.badges.badge1.name ? 'badge1' : !profile.badges.badge2.name ? 'badge2' : 'badge3';
+
+                  const { error } = await supabase.rpc('update_badge_slot', {
+                    p_user_id: profile.uid,
+                    p_slot: slot,
+                    p_badge: newBadge,
+                  });
+                  if (error) console.error('Error adding badge:', error);
                 }}
                 defaultValue=""
               >
