@@ -412,28 +412,41 @@ enum OperationType {
 
   const fetchBadgeSettings = async () => {
     try {
-      const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
-      if (error) throw error;
-      if (data) {
-        const value = data.value as BadgeSettings;
-        setBadgeSettings({
-          categories: value.categories || DEFAULT_CATEGORIES,
-          requirements: value.requirements || {},
-          requirementMaxScores: value.requirementMaxScores || {},
-          requirementCategories: value.requirementCategories || {},
-          groupLinks: value.groupLinks || {}
-        });
-      } else {
-        setBadgeSettings({
-          categories: DEFAULT_CATEGORIES,
-          requirements: {},
-          requirementMaxScores: {},
-          requirementCategories: {}
-        });
-      }
+      const fresh = await fetchFreshBadgeSettings();
+      if (fresh) setBadgeSettings(fresh);
     } catch (error) {
       console.warn('Failed to fetch badges settings:', error);
     }
+  };
+
+  // Reads the badges settings row directly from the server and returns it, without touching
+  // local state. The 4 requirement mutation functions below (add/edit/remove requirement, set
+  // max score) used to build their patch from the `badgeSettings` state variable, which is only
+  // refreshed every 8s by usePolling(fetchBadgeSettings, 8000). Since merge_app_settings only
+  // shallow-merges at the top-level jsonb keys (see NOTE above), sending a `requirements` object
+  // rebuilt from state that is even a few seconds stale silently overwrites/erases any items
+  // added in the meantime - by this same admin acting quickly, or by another admin - which is
+  // why requirements can appear to "disappear after a while". Calling this right before building
+  // the patch shrinks that staleness window from up to 8s down to a single round trip.
+  const fetchFreshBadgeSettings = async (): Promise<BadgeSettings | null> => {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
+    if (error) throw error;
+    if (data) {
+      const value = data.value as BadgeSettings;
+      return {
+        categories: value.categories || DEFAULT_CATEGORIES,
+        requirements: value.requirements || {},
+        requirementMaxScores: value.requirementMaxScores || {},
+        requirementCategories: value.requirementCategories || {},
+        groupLinks: value.groupLinks || {}
+      };
+    }
+    return {
+      categories: DEFAULT_CATEGORIES,
+      requirements: {},
+      requirementMaxScores: {},
+      requirementCategories: {}
+    };
   };
 
   const fetchGeneralSettings = async () => {
@@ -1488,16 +1501,17 @@ enum OperationType {
     if (badgePending.length === 0) return;
 
     try {
-      const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+      const freshSettings = await fetchFreshBadgeSettings();
+      const currentBadgeReqs = (freshSettings?.requirements || {})[badgeName] || {};
       // Migrate legacy array-shaped requirements (no per-stage breakdown) into the
       // stage-keyed object shape before adding new stage-scoped requirements.
       const badgeReqsObj: Partial<Record<Stage | 'all', string[]>> = Array.isArray(currentBadgeReqs)
         ? { all: [...currentBadgeReqs] }
         : { ...currentBadgeReqs };
 
-      const requirementCategories = { ...(badgeSettings.requirementCategories || {}) };
+      const requirementCategories = { ...(freshSettings?.requirementCategories || {}) };
       const badgeCategories = { ...(requirementCategories[badgeName] || {}) };
-      const requirementMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+      const requirementMaxScores = { ...(freshSettings?.requirementMaxScores || {}) };
       const badgeMaxScores = { ...(requirementMaxScores[badgeName] || {}) };
 
       badgePending.forEach(p => {
@@ -1521,13 +1535,17 @@ enum OperationType {
       // jsonb value, so `requirements` must be sent in full (every badge), not just
       // this one badge's slice - otherwise every other badge's requirements would be
       // wiped out.
-      const requirements = { ...(badgeSettings.requirements || {}), [badgeName]: badgeReqsObj };
+      const requirements = { ...(freshSettings?.requirements || {}), [badgeName]: badgeReqsObj };
 
       const { error } = await supabase.rpc('merge_app_settings', {
         p_key: 'badges',
         p_patch: { requirements, requirementCategories, requirementMaxScores }
       });
       if (error) throw error;
+
+      // Reflect the save immediately in local state too, instead of waiting up to 8s for the
+      // next poll - closes the same staleness window for whichever action happens next.
+      setBadgeSettings(prev => ({ ...prev, requirements, requirementCategories, requirementMaxScores }));
 
       setPendingRequirements(prev => prev.filter(p => p.badgeName !== badgeName));
       setNewRequirementCategory('');
@@ -1553,7 +1571,8 @@ enum OperationType {
     const textChanged = oldText !== trimmedNew;
 
     try {
-      const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+      const freshSettings = await fetchFreshBadgeSettings();
+      const currentBadgeReqs = (freshSettings?.requirements || {})[badgeName] || {};
       const badgeReqsObj: Partial<Record<Stage | 'all', string[]>> = Array.isArray(currentBadgeReqs)
         ? { all: [...currentBadgeReqs] }
         : { ...currentBadgeReqs };
@@ -1562,7 +1581,7 @@ enum OperationType {
         badgeReqsObj[stage] = [...(badgeReqsObj[stage] || []).filter(r => r !== oldText), trimmedNew];
       }
 
-      const requirementCategories = { ...(badgeSettings.requirementCategories || {}) };
+      const requirementCategories = { ...(freshSettings?.requirementCategories || {}) };
       const badgeCategories = { ...(requirementCategories[badgeName] || {}) };
       badgeCategories[trimmedNew] = category.trim() || 'عام';
       if (textChanged) {
@@ -1571,9 +1590,9 @@ enum OperationType {
       requirementCategories[badgeName] = badgeCategories;
 
       // Carry over the old max score to the new text unless a new one was explicitly provided.
-      const requirementMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+      const requirementMaxScores = { ...(freshSettings?.requirementMaxScores || {}) };
       const badgeMaxScores = { ...(requirementMaxScores[badgeName] || {}) };
-      const existingMaxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[oldText];
+      const existingMaxScore = freshSettings?.requirementMaxScores?.[badgeName]?.[oldText];
       const newMaxScoreValue = (maxScore && !isNaN(parseInt(maxScore)))
         ? parseInt(maxScore)
         : existingMaxScore;
@@ -1586,13 +1605,15 @@ enum OperationType {
       }
       requirementMaxScores[badgeName] = badgeMaxScores;
 
-      const requirements = { ...(badgeSettings.requirements || {}), [badgeName]: badgeReqsObj };
+      const requirements = { ...(freshSettings?.requirements || {}), [badgeName]: badgeReqsObj };
 
       const { error } = await supabase.rpc('merge_app_settings', {
         p_key: 'badges',
         p_patch: { requirements, requirementCategories, requirementMaxScores }
       });
       if (error) throw error;
+
+      setBadgeSettings(prev => ({ ...prev, requirements, requirementCategories, requirementMaxScores }));
 
       setEditingRequirement(null);
       setMessage({ type: 'success', text: 'تم تعديل البند بنجاح' });
@@ -1612,15 +1633,18 @@ enum OperationType {
     if (!window.confirm('هل أنت متأكد من حذف هذا البند؟')) return;
 
     try {
-      const currentBadgeReqs = (badgeSettings.requirements || {})[badgeName] || {};
+      const freshSettings = await fetchFreshBadgeSettings();
+      const currentBadgeReqs = (freshSettings?.requirements || {})[badgeName] || {};
       const badgeReqsObj: Partial<Record<Stage | 'all', string[]>> = Array.isArray(currentBadgeReqs)
         ? { all: [...currentBadgeReqs] }
         : { ...currentBadgeReqs };
       badgeReqsObj[stage] = (badgeReqsObj[stage] || []).filter(r => r !== req);
-      const requirements = { ...(badgeSettings.requirements || {}), [badgeName]: badgeReqsObj };
+      const requirements = { ...(freshSettings?.requirements || {}), [badgeName]: badgeReqsObj };
 
       const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirements } });
       if (error) throw error;
+
+      setBadgeSettings(prev => ({ ...prev, requirements }));
 
       setMessage({ type: 'success', text: 'تم حذف البند بنجاح' });
 
@@ -1637,11 +1661,13 @@ enum OperationType {
 
   const handleSetRequirementMaxScore = async (badgeName: string, req: string, maxScore: number) => {
     try {
-      const requirementMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+      const freshSettings = await fetchFreshBadgeSettings();
+      const requirementMaxScores = { ...(freshSettings?.requirementMaxScores || {}) };
       requirementMaxScores[badgeName] = { ...(requirementMaxScores[badgeName] || {}), [req]: maxScore };
 
       const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirementMaxScores } });
       if (error) throw error;
+      setBadgeSettings(prev => ({ ...prev, requirementMaxScores }));
       setMessage({ type: 'success', text: 'تم تحديث الدرجة النهائية للبند بنجاح' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
@@ -3778,7 +3804,8 @@ enum OperationType {
                           getScoutBadgeRequirements(gradingSelectedBadge, stage as Stage).forEach(r => allReqsForBadge.add(r));
                         });
 
-                        const updatedMaxScores = { ...(badgeSettings.requirementMaxScores || {}) };
+                        const freshSettings = await fetchFreshBadgeSettings();
+                        const updatedMaxScores = { ...(freshSettings?.requirementMaxScores || {}) };
                         const badgeScores = { ...(updatedMaxScores[gradingSelectedBadge] || {}) };
 
                         allReqsForBadge.forEach(req => {
@@ -3794,6 +3821,7 @@ enum OperationType {
                         if (error) {
                           setMessage({ type: 'error', text: 'حدث خطأ أثناء توحيد الدرجات' });
                         } else {
+                          setBadgeSettings(prev => ({ ...prev, requirementMaxScores: updatedMaxScores }));
                           setMessage({ type: 'success', text: 'تم توحيد الدرجات بنجاح' });
                           setQuickScoreGlobalValue('');
                         }
