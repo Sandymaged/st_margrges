@@ -234,7 +234,7 @@ enum OperationType {
   const isSuperAdmin = 
     (adminPhone && currentProfile?.number === adminPhone) || 
     (adminEmail && currentProfile?.email === adminEmail) ||
-    (adminPhone && currentProfile?.email === `${adminPhone}@scouts.local`) ||
+    (adminPhone && (currentProfile?.email === `${adminPhone}@scouts.local` || currentProfile?.email === `${adminPhone}@st-margrges.vercel.app`)) ||
     currentProfile?.permissions?.canManagePermissions;
 
   const handleGrantAllPermissions = () => {

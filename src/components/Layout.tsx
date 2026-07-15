@@ -38,7 +38,7 @@ export default function Layout({ children, user, profile, view, setView, general
   const isSuperAdmin = 
     (adminPhone && profile?.number === adminPhone) || 
     (adminEmail && profile?.email === adminEmail) || 
-    (adminPhone && profile?.email === `${adminPhone}@scouts.local`) ||
+    (adminPhone && (profile?.email === `${adminPhone}@scouts.local` || profile?.email === `${adminPhone}@st-margrges.vercel.app`)) ||
     profile?.permissions?.canManagePermissions;
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
