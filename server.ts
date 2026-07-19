@@ -8,15 +8,8 @@ import cors from "cors";
 
 dotenv.config();
 
-import statusHandler from "./api/admin/status.js";
-import deleteUserHandler from "./api/admin/delete-user.js";
-import updatePhoneHandler from "./api/admin/update-phone.js";
-import updatePasswordHandler from "./api/admin/update-password.js";
-import createAccountHandler from "./api/admin/create-account.js";
-import loginHandler from "./api/auth/login.js";
-import registerHandler from "./api/auth/register.js";
-import logoutHandler from "./api/auth/logout.js";
-import meHandler from "./api/auth/me.js";
+import { statusHandler, deleteUserHandler, updatePhoneHandler, updatePasswordHandler, createAccountHandler } from "./api/admin/handlers.js";
+import { loginHandler, registerHandler, logoutHandler, meHandler } from "./api/auth/handlers.js";
 import rpcHandler from "./api/rpc.js";
 import queryHandler from "./api/query.js";
 import appSettingsHandler from "./api/app-settings.js";
