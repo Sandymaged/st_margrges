@@ -11,6 +11,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "migrate:supabase": "tsx scripts/migrate-to-supabase.ts",
+    "set-password": "tsx scripts/set-password.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
