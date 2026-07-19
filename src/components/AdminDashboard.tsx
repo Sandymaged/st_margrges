@@ -1286,6 +1286,7 @@ enum OperationType {
     try {
       const currentBadge = scout.badges[badgeKey];
       const notesChanged = merged.notes !== undefined && merged.notes !== currentBadge.notes;
+      let confirmedBadge: BadgeProgress | null = null;
 
       if (merged.requirementScores !== undefined || notesChanged) {
         // No dedicated RPC exists for setting requirementScores or notes on their own
@@ -1307,6 +1308,7 @@ enum OperationType {
         };
         const { error } = await rpc('update_badge_slot', { p_user_id: scout.uid, p_slot: badgeKey, p_badge: newBadge });
         if (error) throw error;
+        confirmedBadge = newBadge;
       } else if (merged.completedRequirements !== undefined) {
         // Pure checkbox toggles: use the same arrayUnion/arrayRemove-equivalent RPCs
         // used elsewhere in this file, so this can't clobber a concurrent admin's edit
@@ -1325,9 +1327,21 @@ enum OperationType {
         const results = await Promise.all(ops);
         const failed = results.find(r => r.error);
         if (failed?.error) throw failed.error;
+
+        const reqs = getScoutBadgeRequirements(currentBadge.name, scout.stage);
+        const newProgress = calculateBadgeProgress(currentBadge.name, reqs, newCompleted, currentBadge.requirementScores || {});
+        confirmedBadge = { ...currentBadge, completedRequirements: newCompleted, progress: newProgress };
       } else {
         return;
       }
+
+      // Write the now-confirmed value straight into `scouts` instead of waiting up to
+      // 6s for the next poll (see usePolling(fetchScouts, 6000) below) - otherwise the
+      // optimistic-overlay cleanup in `finally` leaves a window where the UI falls back
+      // to this stale pre-edit value, making a successfully-saved change look like it
+      // "didn't go through".
+      const finalBadge = confirmedBadge;
+      setScouts(prev => prev.map(s => (s.uid === scout.uid ? { ...s, badges: { ...s.badges, [badgeKey]: finalBadge } } : s)));
 
       setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
     } catch (error) {
