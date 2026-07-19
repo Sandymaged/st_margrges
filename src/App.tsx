@@ -1,13 +1,6 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect } from 'react';
-import type { User } from '@supabase/supabase-js';
-import { supabase } from './supabaseClient';
+import React, { useState, useEffect, useCallback } from 'react';
 import { usePolling } from './lib/usePolling';
-import { rowToScoutProfile, PROFILE_COLUMNS } from './lib/mappers';
+import { useSSE } from './lib/useSSE';
 import { ScoutProfile, GeneralSettings } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
@@ -15,6 +8,7 @@ import ScoutProfileView from './components/ScoutProfile';
 import AdminDashboard from './components/AdminDashboard';
 import { LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getSession, logout as authLogout, getStoredToken, getStoredUser, clearSession } from './authClient';
 
 const SkeletonLoader = () => (
   <div className="space-y-8 animate-pulse" dir="rtl">
@@ -43,7 +37,7 @@ const SkeletonLoader = () => (
 );
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<{ id: string; phone: string; role: string } | null>(null);
   const [profile, setProfile] = useState<ScoutProfile | null>(null);
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
     logoUrl: '/syncc.png',
@@ -54,71 +48,93 @@ export default function App() {
   const [view, setView] = useState<'profile' | 'dashboard'>('profile');
 
   usePolling(async () => {
-    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
-    if (error) {
+    try {
+      const res = await fetch('/api/app-settings?key=general');
+      const result = await res.json();
+      if (!res.ok) {
+        console.warn('Failed to fetch general settings:', result.error);
+        return;
+      }
+      const value = result.data?.value as GeneralSettings | undefined;
+      if (value) {
+        setGeneralSettings({ ...value, logoUrl: '/syncc.png' });
+      }
+    } catch (error) {
       console.warn('Failed to fetch general settings:', error);
-      return;
-    }
-    const value = data?.value as GeneralSettings | undefined;
-    if (value) {
-      setGeneralSettings({ ...value, logoUrl: '/syncc.png' });
     }
   }, 10000);
 
   useEffect(() => {
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    const token = getStoredToken();
+    if (!token) {
       setIsAuthReady(true);
-      if (!session?.user) {
+      setLoading(false);
+      return;
+    }
+
+    getSession().then(session => {
+      if (session) {
+        setUser(session.user);
+        setProfile(session.profile);
+      } else {
+        clearSession();
+        setUser(null);
         setProfile(null);
-        setLoading(false);
       }
+      setIsAuthReady(true);
+      setLoading(false);
     });
-    return () => subscription.subscription.unsubscribe();
   }, []);
 
-  usePolling(async () => {
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(PROFILE_COLUMNS)
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Profile fetch error:', error);
-      setLoading(false);
-      return;
-    }
-
-    if (data) {
-      setProfile(rowToScoutProfile(data));
-      setLoading(false);
-      return;
-    }
+  useEffect(() => {
+    if (!user || profile !== null || !getStoredToken()) return;
 
     const adminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL;
     const adminPhone = import.meta.env.VITE_SUPER_ADMIN_PHONE;
     const isSuperAdmin =
-      (adminEmail && user.email === adminEmail) ||
-      (adminPhone && user.email === `${adminPhone}@scouts.local`);
+      (adminEmail && user.phone === adminEmail) ||
+      (adminPhone && user.phone === adminPhone);
 
-    if (isSuperAdmin) {
-      const { error: bootstrapError } = await supabase.rpc('bootstrap_first_admin', {
-        p_name: 'مسؤول النظام',
-        p_number: adminPhone || '0',
-        p_email: user.email || adminEmail || '',
-      });
-      if (bootstrapError) {
-        console.error('Admin bootstrap failed:', bootstrapError);
-      }
-      // Next poll tick will pick up the newly created profile row.
-    } else {
+    if (!isSuperAdmin) {
       setProfile(null);
+      setLoading(false);
+      return;
     }
-    setLoading(false);
-  }, 5000, !!user);
+
+    const authToken = getStoredToken();
+    fetch('/api/rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({
+        function: 'bootstrap_first_admin',
+        params: {
+          p_name: 'مسؤول النظام',
+          p_number: adminPhone || '0',
+          p_email: user.phone || adminEmail || '',
+        }
+      }),
+    }).then(res => res.json()).then(() => {
+      getSession().then(session => {
+        if (session?.profile) {
+          setProfile(session.profile);
+        }
+        setLoading(false);
+      });
+    });
+  }, [user]);
+
+  const handleProfileUpdated = useCallback((event: { userId: string }) => {
+    const storedUser = getStoredUser();
+    if (!storedUser || storedUser.id !== event.userId) return;
+
+    getSession().then(session => {
+      if (session?.profile) {
+        setProfile(session.profile);
+      }
+    });
+  }, []);
+
+  useSSE({ onProfileUpdated: handleProfileUpdated }, !!getStoredUser());
 
   if (!isAuthReady) {
     return (
@@ -170,7 +186,7 @@ export default function App() {
           >
             <Auth />
             <button
-              onClick={() => supabase.auth.signOut()}
+              onClick={() => { authLogout(); setUser(null); setProfile(null); }}
               className="mt-8 text-gray-500 font-bold hover:text-red-600 transition-all flex items-center gap-2"
             >
               <LogOut size={20} />

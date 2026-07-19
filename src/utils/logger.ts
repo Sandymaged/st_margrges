@@ -1,4 +1,4 @@
-import { supabase } from '../supabaseClient';
+import { rpc } from '../authClient';
 
 export const logActivity = async (
   action: string,
@@ -9,7 +9,7 @@ export const logActivity = async (
   targetUserName?: string
 ) => {
   try {
-    const { error } = await supabase.rpc('log_activity', {
+    const { error } = await rpc('log_activity', {
       p_action: action,
       p_details: details,
       p_target_user_id: targetUserId || null,

@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ScoutProfile, BadgeSettings, GeneralSettings } from '../types';
 import BadgeProgressCard from './BadgeProgressCard';
 import { User as UserIcon, MapPin, Hash, LayoutGrid, Calendar, CheckCircle2, XCircle, DollarSign, Download, MessageCircle, Award, Trash2, Smartphone, X, Share2, MoreVertical, PlusSquare, Info } from 'lucide-react';
-import { supabase } from '../supabaseClient';
 import { usePolling } from '../lib/usePolling';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
+import { rpc, apiQuery } from '../authClient';
 
 interface ScoutProfileViewProps {
   profile: ScoutProfile;
@@ -24,6 +24,8 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
   });
   const [cancelBadgeConfirm, setCancelBadgeConfirm] = useState<{key: 'badge1' | 'badge2' | 'badge3', name: string} | null>(null);
   const [isCancelChecked, setIsCancelChecked] = useState(false);
+  const [joinedGroup, setJoinedGroup] = useState(false);
+  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState<boolean>(false);
@@ -78,38 +80,48 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
   };
 
   usePolling(async () => {
-    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
-    if (error) {
+    try {
+      const res = await fetch('/api/app-settings?key=badges');
+      const result = await res.json();
+      if (!res.ok) {
+        console.warn('Failed to fetch badges settings:', result.error);
+        return;
+      }
+      const value = result.data?.value as any;
+      if (value) {
+        setBadgeSettings({
+          categories: value.categories || [],
+          requirements: value.requirements || {},
+          requirementMaxScores: value.requirementMaxScores || {},
+          requirementCategories: value.requirementCategories || {},
+          groupLinks: value.groupLinks || {}
+        });
+      }
+    } catch (error) {
       console.warn('Failed to fetch badges settings:', error);
-      return;
-    }
-    const value = data?.value as any;
-    if (value) {
-      setBadgeSettings({
-        categories: value.categories || [],
-        requirements: value.requirements || {},
-        requirementMaxScores: value.requirementMaxScores || {},
-        requirementCategories: value.requirementCategories || {},
-        groupLinks: value.groupLinks || {}
-      });
     }
   }, 10000);
 
   usePolling(async () => {
-    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
-    if (error) {
+    try {
+      const res = await fetch('/api/app-settings?key=general');
+      const result = await res.json();
+      if (!res.ok) {
+        console.warn('Failed to fetch general settings:', result.error);
+        return;
+      }
+      const value = result.data?.value as GeneralSettings | undefined;
+      if (value) {
+        setGeneralSettings({
+          ...value,
+          logoUrl: '/syncc.png',
+          scoutGroupName: value.scoutGroupName || 'مجموعة مارجرجس الكشفية',
+          badgePrice: value.badgePrice || 30,
+          attendanceDates: value.attendanceDates || []
+        });
+      }
+    } catch (error) {
       console.warn('Failed to fetch general settings:', error);
-      return;
-    }
-    const value = data?.value as GeneralSettings | undefined;
-    if (value) {
-      setGeneralSettings({
-        ...value,
-        logoUrl: '/syncc.png',
-        scoutGroupName: value.scoutGroupName || 'مجموعة مارجرجس الكشفية',
-        badgePrice: value.badgePrice || 30,
-        attendanceDates: value.attendanceDates || []
-      });
     }
   }, 10000);
 
@@ -127,7 +139,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
     }
 
     try {
-      const { error } = await supabase.rpc('update_badge_slot', {
+      const { error } = await rpc('update_badge_slot', {
         p_user_id: profile.uid,
         p_slot: cancelBadgeConfirm.key,
         p_badge: { name: '', progress: 0, notes: '', completedRequirements: [], requirementScores: {} },
@@ -245,8 +257,14 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
 
   const handleDismissWelcome = async () => {
     try {
-      const { error } = await supabase.rpc('dismiss_welcome_groups');
+      const { error } = await apiQuery({
+        table: 'profiles',
+        method: 'update',
+        data: { show_welcome_groups: false },
+        filters: [{ method: 'eq', column: 'id', value: profile.uid }],
+      });
       if (error) throw error;
+      setWelcomeDismissed(true);
     } catch (error) {
       console.error('Error dismissing welcome modal:', error);
     }
@@ -363,7 +381,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
 
       {/* Welcome Groups Modal */}
       <AnimatePresence>
-        {profile.showWelcomeGroups && (
+        {!welcomeDismissed && profile.showWelcomeGroups && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -391,6 +409,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                           href={link} 
                           target="_blank" 
                           rel="noopener noreferrer"
+                          onClick={() => setJoinedGroup(true)}
                           className="px-6 py-2.5 bg-[#4285F4] text-white rounded-xl hover:bg-blue-600 transition-colors font-bold text-sm text-center w-full sm:w-auto shadow-sm whitespace-nowrap"
                         >
                           انضمام للجروب
@@ -407,12 +426,23 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                   )}
                 </div>
                 
-                <button
-                  onClick={handleDismissWelcome}
-                  className="w-full mt-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black py-4 rounded-2xl transition-all"
-                >
-                  حسناً، لقد انضممت
-                </button>
+                {(() => {
+                  const hasLinks = [profile.badges.badge1, profile.badges.badge2, profile.badges.badge3].some((b) => b && b.name && getGroupLink(b.name, profile.stage));
+                  const isDisabled = hasLinks && !joinedGroup;
+                  return (
+                    <button
+                      onClick={handleDismissWelcome}
+                      disabled={isDisabled}
+                      className={`w-full mt-4 font-black py-4 rounded-2xl transition-all ${
+                        isDisabled
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                      }`}
+                    >
+                      حسناً، لقد انضممت
+                    </button>
+                  );
+                })()}
               </div>
             </motion.div>
           </div>
@@ -565,7 +595,7 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
                   const newBadge = { name: e.target.value, progress: 0, notes: '', completedRequirements: [] };
                   const slot = !profile.badges.badge1.name ? 'badge1' : !profile.badges.badge2.name ? 'badge2' : 'badge3';
 
-                  const { error } = await supabase.rpc('update_badge_slot', {
+                  const { error } = await rpc('update_badge_slot', {
                     p_user_id: profile.uid,
                     p_slot: slot,
                     p_badge: newBadge,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { supabase } from '../supabaseClient';
 import { usePolling } from '../lib/usePolling';
 import { rowToScoutProfile, PROFILE_COLUMNS } from '../lib/mappers';
+import { rpc, apiQuery, getStoredToken } from '../authClient';
 import {
   ScoutProfile, 
   STAGES, 
@@ -385,8 +385,8 @@ enum OperationType {
     }
   }, [message]);
 
-  const handleFirestoreError = (error: any, operation: string, path: string) => {
-    console.error(`Supabase Error (${operation}) at ${path}:`, error);
+  const handleApiError = (error: any, operation: string, path: string) => {
+    console.error(`Error (${operation}) at ${path}:`, error);
     const errorMsg = error?.message || String(error);
     if (errorMsg.includes('permission-denied') || errorMsg.toLowerCase().includes('not authorized') || errorMsg.toLowerCase().includes('only admins')) {
       setMessage({ type: 'error', text: 'ليس لديك صلاحية للقيام بهذا الإجراء' });
@@ -400,11 +400,11 @@ enum OperationType {
   // re-fetches on an interval instead (see ../lib/usePolling).
   const fetchScouts = async () => {
     try {
-      const { data, error } = await supabase.from('profiles').select(PROFILE_COLUMNS);
+      const { data, error } = await apiQuery({ table: 'profiles', columns: PROFILE_COLUMNS });
       if (error) throw error;
       setScouts((data || []).map(rowToScoutProfile));
     } catch (error) {
-      console.error('Supabase error fetching scouts:', error);
+      console.error('Error fetching scouts:', error);
     } finally {
       setLoading(false);
     }
@@ -429,17 +429,23 @@ enum OperationType {
   // why requirements can appear to "disappear after a while". Calling this right before building
   // the patch shrinks that staleness window from up to 8s down to a single round trip.
   const fetchFreshBadgeSettings = async (): Promise<BadgeSettings | null> => {
-    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
-    if (error) throw error;
-    if (data) {
-      const value = data.value as BadgeSettings;
-      return {
-        categories: value.categories || DEFAULT_CATEGORIES,
-        requirements: value.requirements || {},
-        requirementMaxScores: value.requirementMaxScores || {},
-        requirementCategories: value.requirementCategories || {},
-        groupLinks: value.groupLinks || {}
-      };
+    try {
+      const res = await fetch('/api/app-settings?key=badges');
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
+      if (result.data) {
+        const value = result.data.value as BadgeSettings;
+        return {
+          categories: value.categories || DEFAULT_CATEGORIES,
+          requirements: value.requirements || {},
+          requirementMaxScores: value.requirementMaxScores || {},
+          requirementCategories: value.requirementCategories || {},
+          groupLinks: value.groupLinks || {}
+        };
+      }
+    } catch (error) {
+      console.error('Failed to fetch fresh badge settings:', error);
+      throw error;
     }
     return {
       categories: DEFAULT_CATEGORIES,
@@ -451,10 +457,11 @@ enum OperationType {
 
   const fetchGeneralSettings = async () => {
     try {
-      const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
-      if (error) throw error;
-      if (data) {
-        const value = data.value as GeneralSettings;
+      const res = await fetch('/api/app-settings?key=general');
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
+      if (result.data) {
+        const value = result.data.value as GeneralSettings;
         setGeneralSettings({
           logoUrl: '/syncc.png',
           scoutGroupName: value.scoutGroupName || 'مجموعة مارجرجس الكشفية',
@@ -472,7 +479,11 @@ enum OperationType {
 
   const fetchActivityLogs = async () => {
     try {
-      const { data, error } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false });
+      const { data, error } = await apiQuery({
+        table: 'activity_logs',
+        columns: '*',
+        filters: [{ method: 'order', column: 'created_at', ascending: false }] as any
+      });
       if (error) throw error;
       setActivityLogs((data || []).map((row: any) => ({
         id: row.id,
@@ -489,7 +500,11 @@ enum OperationType {
 
   const fetchDeletedAccountsLogs = async () => {
     try {
-      const { data, error } = await supabase.from('deleted_accounts_logs').select('*').order('created_at', { ascending: false });
+      const { data, error } = await apiQuery({
+        table: 'deleted_accounts_logs',
+        columns: '*',
+        filters: [{ method: 'order', column: 'created_at', ascending: false }] as any
+      });
       if (error) throw error;
       setDeletedAccountsLogs((data || []).map((row: any) => ({
         id: row.id,
@@ -534,23 +549,28 @@ enum OperationType {
 
         const newPassedBadges = Array.from(new Set([...(scout.passedBadges || []), ...passed]));
 
-        return supabase.from('profiles').update({
-          past_waves: {
-            ...(scout.pastWaves || {}),
-            wave1: { badges: scout.badges }
+        return apiQuery({
+          table: 'profiles',
+          method: 'update',
+          data: {
+            past_waves: {
+              ...(scout.pastWaves || {}),
+              wave1: { badges: scout.badges }
+            },
+            passed_badges: newPassedBadges,
+            badges: {
+              badge1: { name: '', progress: 0, notes: '', completedRequirements: [] },
+              badge2: { name: '', progress: 0, notes: '', completedRequirements: [] },
+              badge3: { name: '', progress: 0, notes: '', completedRequirements: [] }
+            }
           },
-          passed_badges: newPassedBadges,
-          badges: {
-            badge1: { name: '', progress: 0, notes: '', completedRequirements: [] },
-            badge2: { name: '', progress: 0, notes: '', completedRequirements: [] },
-            badge3: { name: '', progress: 0, notes: '', completedRequirements: [] }
-          }
-        }).eq('id', scout.uid);
+          filters: [{ method: 'eq', column: 'id', value: scout.uid }]
+        });
       }));
       const failedScoutUpdate = results.find(r => r.error);
       if (failedScoutUpdate?.error) throw failedScoutUpdate.error;
 
-      const { error: settingsError } = await supabase.rpc('merge_app_settings', {
+      const { error: settingsError } = await rpc('merge_app_settings', {
         p_key: 'general',
         p_patch: { activeWave: 'wave2', showResults: true }
       });
@@ -558,7 +578,7 @@ enum OperationType {
 
       setMessage({ type: 'success', text: 'تم إنهاء الدفعة الأولى بنجاح، وتم تفعيل الدفعة الثانية وإظهار النتائج.' });
     } catch (error) {
-      handleFirestoreError(error, 'End Wave 1', 'batch');
+      handleApiError(error, 'End Wave 1', 'batch');
     } finally {
       setLoading(false);
     }
@@ -573,16 +593,21 @@ enum OperationType {
       const scoutsWithWave1 = scouts.filter(s => s.pastWaves && s.pastWaves.wave1);
       const results = await Promise.all(scoutsWithWave1.map(scout => {
         const { wave1, ...restWaves } = scout.pastWaves || {};
-        return supabase.from('profiles').update({
-          badges: scout.pastWaves!.wave1!.badges,
-          past_waves: restWaves,
-          passed_badges: []
-        }).eq('id', scout.uid);
+        return apiQuery({
+          table: 'profiles',
+          method: 'update',
+          data: {
+            badges: scout.pastWaves!.wave1!.badges,
+            past_waves: restWaves,
+            passed_badges: []
+          },
+          filters: [{ method: 'eq', column: 'id', value: scout.uid }]
+        });
       }));
       const failedScoutUpdate = results.find(r => r.error);
       if (failedScoutUpdate?.error) throw failedScoutUpdate.error;
 
-      const { error: settingsError } = await supabase.rpc('merge_app_settings', {
+      const { error: settingsError } = await rpc('merge_app_settings', {
         p_key: 'general',
         p_patch: { activeWave: 'wave1', showResults: false }
       });
@@ -590,7 +615,7 @@ enum OperationType {
 
       setMessage({ type: 'success', text: 'تم التراجع عن إنهاء الدفعة الأولى بنجاح.' });
     } catch (error) {
-      handleFirestoreError(error, 'Revert Wave 1', 'batch');
+      handleApiError(error, 'Revert Wave 1', 'batch');
     } finally {
       setLoading(false);
     }
@@ -717,14 +742,14 @@ enum OperationType {
 
     if (hasChanges) {
       try {
-        const { error } = await supabase.rpc('merge_app_settings', {
+        const { error } = await rpc('merge_app_settings', {
           p_key: 'badges',
           p_patch: { requirements: updatedRequirements, categories: updatedCategories }
         });
         if (error) throw error;
         setMessage({ type: 'success', text: 'تم تحديث متطلبات وتصنيفات الشارات للمراحل الجديدة بنجاح' });
       } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+        handleApiError(error, OperationType.UPDATE, 'settings/badges');
       }
     } else {
       setMessage({ type: 'success', text: 'لا توجد بيانات قديمة تحتاج للتحديث' });
@@ -746,7 +771,7 @@ enum OperationType {
     }
 
     try {
-      const { error } = await supabase.rpc('set_attendance', { p_user_id: scout.uid, p_date: scannerDate, p_present: true });
+      const { error } = await rpc('set_attendance', { p_user_id: scout.uid, p_date: scannerDate, p_present: true });
       if (error) throw error;
 
       const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -763,14 +788,14 @@ enum OperationType {
         scout.name
       );
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+      handleApiError(error, OperationType.UPDATE, `users/${scout.uid}`);
     }
   };
 
   const handleUndoScan = async (scoutUid: string, logIndex: number) => {
     if (!scannerDate) return;
     try {
-      const { error } = await supabase.rpc('set_attendance', { p_user_id: scoutUid, p_date: scannerDate, p_present: false });
+      const { error } = await rpc('set_attendance', { p_user_id: scoutUid, p_date: scannerDate, p_present: false });
       if (error) throw error;
 
       setScanLogs(prev => prev.map((log, idx) =>
@@ -789,7 +814,7 @@ enum OperationType {
         );
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${scoutUid}`);
+      handleApiError(error, OperationType.UPDATE, `users/${scoutUid}`);
     }
   };
 
@@ -844,21 +869,17 @@ enum OperationType {
 
     setCreatingAccount(true);
     try {
-      // Supabase's browser client has no equivalent to Firebase's "secondary app
-      // instance" trick for creating another user without signing the current admin
-      // out - calling supabase.auth.signUp() here would sign the admin's own session
-      // out and in as the new user. So this goes through a backend endpoint using the
-      // Supabase service-role key instead.
+      // Account creation goes through a backend endpoint using the service-role key.
+      const adminToken = getStoredToken();
       const response = await fetch('/api/admin/create-account', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
         body: JSON.stringify({
           name: newAccountForm.name,
           phone: newAccountForm.phone,
           password: newAccountForm.password,
           stage: newAccountForm.stage,
-          role: newAccountForm.role,
-          adminToken: (await supabase.auth.getSession()).data.session?.access_token
+          role: newAccountForm.role
         })
       });
 
@@ -967,7 +988,7 @@ enum OperationType {
             // activity_logs on every row of the imported sheet, doubling the writes
             // for what's already a bulk, routine grading action. Removed for the same
             // reason as the live grading tab - the data itself is still saved normally.
-            const { error } = await supabase.rpc('update_badge_slot', {
+            const { error } = await rpc('update_badge_slot', {
               p_user_id: scout.uid,
               p_slot: badgeKey,
               p_badge: newBadge
@@ -1166,17 +1187,15 @@ enum OperationType {
       if (badgeSlotUpdates.length > 0) hasChanges = true;
 
       if (hasChanges) {
-        // If phone number changed, update it in Supabase Auth via API
+        // If phone number changed, update it via API
         if (profileFieldUpdates.number) {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const adminToken = sessionData.session?.access_token;
+          const adminToken = getStoredToken();
           const response = await fetch('/api/admin/update-phone', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
             body: JSON.stringify({
               uid: editingScout.uid,
-              newPhone: profileFieldUpdates.number,
-              adminToken
+              newPhone: profileFieldUpdates.number
             })
           });
           if (!response.ok) {
@@ -1203,13 +1222,13 @@ enum OperationType {
         }
 
         if (Object.keys(profileFieldUpdates).length > 0) {
-          const { error } = await supabase.from('profiles').update(profileFieldUpdates).eq('id', editingScout.uid);
+          const { error } = await apiQuery({ table: 'profiles', method: 'update', data: profileFieldUpdates, filters: [{ method: 'eq', column: 'id', value: editingScout.uid }] });
           if (error) throw error;
         }
 
         if (badgeSlotUpdates.length > 0) {
           const results = await Promise.all(badgeSlotUpdates.map(({ key, badge }) =>
-            supabase.rpc('update_badge_slot', { p_user_id: editingScout.uid, p_slot: key, p_badge: badge })
+            rpc('update_badge_slot', { p_user_id: editingScout.uid, p_slot: key, p_badge: badge })
           ));
           const failed = results.find(r => r.error);
           if (failed?.error) throw failed.error;
@@ -1231,7 +1250,7 @@ enum OperationType {
         setEditForm(null);
       }
     } catch (error) {
-      handleFirestoreError(error, 'update', `users/${editingScout.uid}`);
+      handleApiError(error, 'update', `users/${editingScout.uid}`);
     } finally {
       setEditLoading(false);
     }
@@ -1286,7 +1305,7 @@ enum OperationType {
           completedRequirements: completedReqs,
           requirementScores: scores
         };
-        const { error } = await supabase.rpc('update_badge_slot', { p_user_id: scout.uid, p_slot: badgeKey, p_badge: newBadge });
+        const { error } = await rpc('update_badge_slot', { p_user_id: scout.uid, p_slot: badgeKey, p_badge: newBadge });
         if (error) throw error;
       } else if (merged.completedRequirements !== undefined) {
         // Pure checkbox toggles: use the same arrayUnion/arrayRemove-equivalent RPCs
@@ -1298,8 +1317,8 @@ enum OperationType {
         const removed = currentCompleted.filter(r => !newCompleted.includes(r));
 
         const ops = [
-          ...added.map(req => supabase.rpc('add_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req })),
-          ...removed.map(req => supabase.rpc('remove_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req }))
+          ...added.map(req => rpc('add_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req })),
+          ...removed.map(req => rpc('remove_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req }))
         ];
 
         if (ops.length === 0) return;
@@ -1312,7 +1331,7 @@ enum OperationType {
 
       setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+      handleApiError(error, OperationType.UPDATE, `users/${scout.uid}`);
       setMessage({ type: 'error', text: 'حدث خطأ أثناء حفظ التقييم' });
     } finally {
       setOptimisticBadgeUpdates(prev => {
@@ -1373,12 +1392,12 @@ enum OperationType {
     };
     const updatedCategories = [...(badgeSettings.categories || []), newCategory];
     try {
-      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      const { error } = await rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
       if (error) throw error;
       setNewCategoryName('');
       setMessage({ type: 'success', text: 'تم إضافة التصنيف بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1386,11 +1405,11 @@ enum OperationType {
     if (!window.confirm('هل أنت متأكد من حذف هذا التصنيف؟')) return;
     const updatedCategories = (badgeSettings.categories || []).filter(c => c.id !== categoryId);
     try {
-      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      const { error } = await rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
       if (error) throw error;
       setMessage({ type: 'success', text: 'تم حذف التصنيف بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1403,13 +1422,13 @@ enum OperationType {
       return c;
     });
     try {
-      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      const { error } = await rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
       if (error) throw error;
       setRenamingCategoryId(null);
       setRenamingCategoryName('');
       setMessage({ type: 'success', text: 'تم إعادة تسمية التصنيف بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1428,12 +1447,12 @@ enum OperationType {
       return c;
     });
     try {
-      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      const { error } = await rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
       if (error) throw error;
       setNewBadgeForCategory('');
       setMessage({ type: 'success', text: 'تم إضافة الشارة بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1454,11 +1473,11 @@ enum OperationType {
       return c;
     });
     try {
-      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
+      const { error } = await rpc('merge_app_settings', { p_key: 'badges', p_patch: { categories: updatedCategories } });
       if (error) throw error;
       setMessage({ type: 'success', text: 'تم حذف الشارة بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1537,7 +1556,7 @@ enum OperationType {
       // wiped out.
       const requirements = { ...(freshSettings?.requirements || {}), [badgeName]: badgeReqsObj };
 
-      const { error } = await supabase.rpc('merge_app_settings', {
+      const { error } = await rpc('merge_app_settings', {
         p_key: 'badges',
         p_patch: { requirements, requirementCategories, requirementMaxScores }
       });
@@ -1559,7 +1578,7 @@ enum OperationType {
         currentProfile?.name || 'مسؤول'
       );
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1607,7 +1626,7 @@ enum OperationType {
 
       const requirements = { ...(freshSettings?.requirements || {}), [badgeName]: badgeReqsObj };
 
-      const { error } = await supabase.rpc('merge_app_settings', {
+      const { error } = await rpc('merge_app_settings', {
         p_key: 'badges',
         p_patch: { requirements, requirementCategories, requirementMaxScores }
       });
@@ -1625,7 +1644,7 @@ enum OperationType {
         currentProfile?.name || 'مسؤول'
       );
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1641,7 +1660,7 @@ enum OperationType {
       badgeReqsObj[stage] = (badgeReqsObj[stage] || []).filter(r => r !== req);
       const requirements = { ...(freshSettings?.requirements || {}), [badgeName]: badgeReqsObj };
 
-      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirements } });
+      const { error } = await rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirements } });
       if (error) throw error;
 
       setBadgeSettings(prev => ({ ...prev, requirements }));
@@ -1655,7 +1674,7 @@ enum OperationType {
         currentProfile?.name || 'مسؤول'
       );
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1665,12 +1684,12 @@ enum OperationType {
       const requirementMaxScores = { ...(freshSettings?.requirementMaxScores || {}) };
       requirementMaxScores[badgeName] = { ...(requirementMaxScores[badgeName] || {}), [req]: maxScore };
 
-      const { error } = await supabase.rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirementMaxScores } });
+      const { error } = await rpc('merge_app_settings', { p_key: 'badges', p_patch: { requirementMaxScores } });
       if (error) throw error;
       setBadgeSettings(prev => ({ ...prev, requirementMaxScores }));
       setMessage({ type: 'success', text: 'تم تحديث الدرجة النهائية للبند بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+      handleApiError(error, OperationType.UPDATE, 'settings/badges');
     }
   };
 
@@ -1686,14 +1705,13 @@ enum OperationType {
 
     setIsDeletingAuth(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const adminToken = sessionData.session?.access_token;
+      const adminToken = getStoredToken();
       if (!adminToken) throw new Error('يجب تسجيل الدخول كمسؤول');
 
       const response = await fetch('/api/admin/delete-user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: authPhoneToDelete, adminToken })
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({ phone: authPhoneToDelete })
       });
 
       let data;
@@ -1704,7 +1722,7 @@ enum OperationType {
         const text = await response.text();
         console.error('Non-JSON response from server:', text);
         throw new Error(text.includes('A server error occurred') 
-          ? 'خطأ في الخادم. تأكد من صحة مفتاح Firebase Service Account في الإعدادات.'
+          ? 'خطأ في الخادم. يرجى التحقق من إعدادات الخادم.'
           : 'حدث خطأ غير متوقع في الخادم');
       }
 
@@ -1816,7 +1834,7 @@ enum OperationType {
 
     setEditLoading(true);
     try {
-      const { error } = await supabase.rpc('update_permissions', {
+      const { error } = await rpc('update_permissions', {
         p_user_id: editingPermissionsFor.uid,
         p_permissions: permissionsForm
       });
@@ -1848,7 +1866,7 @@ enum OperationType {
     if (!window.confirm(`هل أنت متأكد من ${actionText} لهذا المستخدم؟`)) return false;
 
     try {
-      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', scoutId);
+      const { error } = await apiQuery({ table: 'profiles', method: 'update', data: { role: newRole }, filters: [{ method: 'eq', column: 'id', value: scoutId }] });
       if (error) throw error;
       const targetScout = scouts.find(s => s.uid === scoutId);
       await logActivity(
@@ -1877,15 +1895,19 @@ enum OperationType {
     setDeleteLoading(true);
     try {
       // 1. Write custom log to deleted_accounts_logs
-      const { error: logError } = await supabase.from('deleted_accounts_logs').insert({
-        deleted_scout_number: deletingScout.number || 'بدون رقم',
-        deleted_by: currentProfile.uid,
-        deleted_by_name: currentProfile.name || 'مسؤول'
+      const { error: logError } = await apiQuery({
+        table: 'deleted_accounts_logs',
+        method: 'insert',
+        data: {
+          deleted_scout_number: deletingScout.number || 'بدون رقم',
+          deleted_by: currentProfile.uid,
+          deleted_by_name: currentProfile.name || 'مسؤول'
+        }
       });
       if (logError) throw logError;
 
-      // 2. Delete from Supabase
-      const { error: deleteError } = await supabase.from('profiles').delete().eq('id', deletingScout.uid);
+      // 2. Delete profile
+      const { error: deleteError } = await apiQuery({ table: 'profiles', method: 'delete', filters: [{ method: 'eq', column: 'id', value: deletingScout.uid }] });
       if (deleteError) throw deleteError;
       await logActivity(
         'حذف حساب',
@@ -1896,15 +1918,14 @@ enum OperationType {
         'حساب محذوف'
       );
 
-      // 3. Try to delete from Supabase Auth via our backend API
-      const { data: sessionData } = await supabase.auth.getSession();
-      const adminToken = sessionData.session?.access_token;
+      // 3. Try to delete from users table via our backend API
+      const adminToken = getStoredToken();
       if (adminToken) {
         try {
           const response = await fetch('/api/admin/delete-user', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: deletingScout.uid, adminToken })
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+            body: JSON.stringify({ uid: deletingScout.uid })
           });
           
           if (!response.ok) {
@@ -1912,7 +1933,7 @@ enum OperationType {
             console.warn('Authentication deletion failed:', errorData.error);
             setMessage({ 
               type: 'success', 
-              text: 'تم حذف بيانات الكشاف من قاعدة البيانات، ولكن يرجى حذف حسابه يدوياً من لوحة تحكم Firebase (Authentication) لضمان الحذف الكامل.' 
+              text: 'تم حذف بيانات الكشاف من قاعدة البيانات، ولكن تعذر حذف حسابه من نظام الدخول.' 
             });
           } else {
             setMessage({ type: 'success', text: 'تم حذف الحساب بالكامل بنجاح' });
@@ -1930,7 +1951,7 @@ enum OperationType {
       
       setDeletingScout(null);
     } catch (error) {
-      handleFirestoreError(error, 'delete', `users/${deletingScout.uid}`);
+      handleApiError(error, 'delete', `users/${deletingScout.uid}`);
     } finally {
       setDeleteLoading(false);
     }
@@ -1940,11 +1961,11 @@ enum OperationType {
     if (!isSuperAdmin) return;
     if (!window.confirm('هل أنت متأكد من حذف هذا السجل؟')) return;
     try {
-      const { error } = await supabase.from('activity_logs').delete().eq('id', logId);
+      const { error } = await apiQuery({ table: 'activity_logs', method: 'delete', filters: [{ method: 'eq', column: 'id', value: logId }] });
       if (error) throw error;
       setMessage({ type: 'success', text: 'تم حذف السجل بنجاح' });
     } catch (error) {
-      handleFirestoreError(error, 'delete', `activity_logs/${logId}`);
+      handleApiError(error, 'delete', `activity_logs/${logId}`);
     }
   };
 
@@ -1954,13 +1975,13 @@ enum OperationType {
     try {
       // No cross-row atomic batch available in Postgres from the client, so this
       // deletes each row independently via Promise.all (accepted, known limitation).
-      const results = await Promise.all(selectedLogs.map(logId => supabase.from('activity_logs').delete().eq('id', logId)));
+      const results = await Promise.all(selectedLogs.map(logId => apiQuery({ table: 'activity_logs', method: 'delete', filters: [{ method: 'eq', column: 'id', value: logId }] })));
       const failed = results.find(r => r.error);
       if (failed?.error) throw failed.error;
       setMessage({ type: 'success', text: 'تم حذف السجلات بنجاح' });
       setSelectedLogs([]);
     } catch (error) {
-      handleFirestoreError(error, 'delete', 'activity_logs/batch');
+      handleApiError(error, 'delete', 'activity_logs/batch');
     }
   };
 
@@ -1972,13 +1993,13 @@ enum OperationType {
     if (!window.confirm(`هل أنت متأكد من حذف ${logsToDelete.length} سجل(ات) معروضة حاليا؟ هذا الإجراء لا يمكن التراجع عنه.`)) return;
 
     try {
-      const results = await Promise.all(logsToDelete.map(log => supabase.from('activity_logs').delete().eq('id', log.id)));
+      const results = await Promise.all(logsToDelete.map(log => apiQuery({ table: 'activity_logs', method: 'delete', filters: [{ method: 'eq', column: 'id', value: log.id }] })));
       const failed = results.find(r => r.error);
       if (failed?.error) throw failed.error;
       setMessage({ type: 'success', text: 'تم حذف السجلات بنجاح' });
       setSelectedLogs([]);
     } catch (error) {
-      handleFirestoreError(error, 'delete', 'activity_logs/batch');
+      handleApiError(error, 'delete', 'activity_logs/batch');
     }
   };
 
@@ -2015,17 +2036,15 @@ enum OperationType {
 
     setPasswordLoading(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const adminToken = sessionData.session?.access_token;
+      const adminToken = getStoredToken();
       if (!adminToken) throw new Error('User not authenticated');
 
       const response = await fetch('/api/admin/update-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
         body: JSON.stringify({ 
           uid: changingPasswordFor.uid, 
-          newPassword: trimmedPassword, 
-          adminToken 
+          newPassword: trimmedPassword
         })
       });
 
@@ -2435,14 +2454,14 @@ enum OperationType {
                                       };
                                       
                                       try {
-                                        const { error } = await supabase.rpc('merge_app_settings', {
+                                        const { error } = await rpc('merge_app_settings', {
                                           p_key: 'badges',
                                           p_patch: { groupLinks: newGroupLinks }
                                         });
                                         if (error) throw error;
                                         setMessage({ type: 'success', text: 'تم حفظ الرابط بنجاح' });
                                       } catch (error) {
-                                        handleFirestoreError(error, OperationType.UPDATE, 'settings/badges');
+                                        handleApiError(error, OperationType.UPDATE, 'settings/badges');
                                       }
                                     }}
                                     className="px-4 py-2 bg-[#4285F4] text-white rounded-lg text-sm font-bold hover:bg-blue-600 transition-colors"
@@ -2937,7 +2956,7 @@ enum OperationType {
                         onClick={async () => {
                           if (window.confirm(`هل أنت متأكد من حذف ${selectedDeletedLogs.length} سجل محذوف؟`)) {
                             try {
-                              const results = await Promise.all(selectedDeletedLogs.map(id => supabase.from('deleted_accounts_logs').delete().eq('id', id)));
+                              const results = await Promise.all(selectedDeletedLogs.map(id => apiQuery({ table: 'deleted_accounts_logs', method: 'delete', filters: [{ method: 'eq', column: 'id', value: id }] })));
                               const failed = results.find(r => r.error);
                               if (failed?.error) throw failed.error;
                               setSelectedDeletedLogs([]);
@@ -2960,7 +2979,7 @@ enum OperationType {
                             // No cross-row atomic batch available in Postgres from the client -
                             // deletes each row independently via Promise.all (accepted, known
                             // limitation of the Firestore -> Supabase migration).
-                            const results = await Promise.all(deletedAccountsLogs.map(log => supabase.from('deleted_accounts_logs').delete().eq('id', log.id)));
+                            const results = await Promise.all(deletedAccountsLogs.map(log => apiQuery({ table: 'deleted_accounts_logs', method: 'delete', filters: [{ method: 'eq', column: 'id', value: log.id }] })));
                             const failed = results.find(r => r.error);
                             if (failed?.error) throw failed.error;
                             setSelectedDeletedLogs([]);
@@ -3048,7 +3067,7 @@ enum OperationType {
                                 <button
                                   onClick={async () => {
                                     try {
-                                      const { error } = await supabase.from('deleted_accounts_logs').delete().eq('id', log.id);
+                                      const { error } = await apiQuery({ table: 'deleted_accounts_logs', method: 'delete', filters: [{ method: 'eq', column: 'id', value: log.id }] });
                                       if (error) throw error;
                                       setMessage({ type: 'success', text: 'تم حذف السجل بنجاح' });
                                     } catch (error) {
@@ -3158,7 +3177,7 @@ enum OperationType {
                     <button
                       onClick={async () => {
                         try {
-                          const { error } = await supabase.rpc('merge_app_settings', {
+                          const { error } = await rpc('merge_app_settings', {
                             p_key: 'general',
                             p_patch: { scoutGroupName: generalSettings.scoutGroupName }
                           });
@@ -3188,7 +3207,7 @@ enum OperationType {
                         value={generalSettings.activeWave || 'wave1'}
                         onChange={async (e) => {
                           const val = e.target.value as 'wave1' | 'wave2';
-                          const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { activeWave: val } });
+                          const { error } = await rpc('merge_app_settings', { p_key: 'general', p_patch: { activeWave: val } });
                           if (error) console.error('Error updating active wave:', error);
                         }}
                         className="px-4 py-2 rounded-xl border border-purple-200 outline-none font-bold text-sm bg-white"
@@ -3208,7 +3227,7 @@ enum OperationType {
                           type="checkbox"
                           checked={generalSettings.showResults || false}
                           onChange={async (e) => {
-                            const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { showResults: e.target.checked } });
+                            const { error } = await rpc('merge_app_settings', { p_key: 'general', p_patch: { showResults: e.target.checked } });
                             if (error) console.error('Error updating showResults:', error);
                           }}
                           className="sr-only peer"
@@ -3370,7 +3389,7 @@ enum OperationType {
                                 : currentAllowed.filter(s => s !== stage);
                               
                               try {
-                                const { error } = await supabase.rpc('merge_app_settings', {
+                                const { error } = await rpc('merge_app_settings', {
                                   p_key: 'general',
                                   p_patch: { allowedRegistrationStages: newAllowed }
                                 });
@@ -3411,10 +3430,10 @@ enum OperationType {
                         if (newPrice > 99) newPrice = 99;
                         setGeneralSettings(prev => ({ ...prev, badgePrice: newPrice }));
                         try {
-                          const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { badgePrice: newPrice } });
+                          const { error } = await rpc('merge_app_settings', { p_key: 'general', p_patch: { badgePrice: newPrice } });
                           if (error) throw error;
                         } catch (error) {
-                          handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                          handleApiError(error, OperationType.UPDATE, 'settings/general');
                         }
                       }}
                       className="w-16 px-2 py-1.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-[#4285F4] outline-none text-center font-bold"
@@ -3445,11 +3464,11 @@ enum OperationType {
                           }
                           const newDates = [...dates, newAttendanceDate].sort();
                           try {
-                            const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { attendanceDates: newDates } });
+                            const { error } = await rpc('merge_app_settings', { p_key: 'general', p_patch: { attendanceDates: newDates } });
                             if (error) throw error;
                             setNewAttendanceDate('');
                           } catch (error) {
-                            handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                            handleApiError(error, OperationType.UPDATE, 'settings/general');
                           }
                         }}
                         className="px-4 py-2 bg-[#4285F4] text-white font-bold rounded-xl hover:bg-blue-600 transition-all text-sm whitespace-nowrap flex-shrink-0 shadow-sm"
@@ -3537,10 +3556,10 @@ enum OperationType {
                                     if (window.confirm('هل أنت متأكد من حذف هذا اليوم؟')) {
                                       const newDates = (generalSettings.attendanceDates || []).filter(d => d !== date);
                                       try {
-                                        const { error } = await supabase.rpc('merge_app_settings', { p_key: 'general', p_patch: { attendanceDates: newDates } });
+                                        const { error } = await rpc('merge_app_settings', { p_key: 'general', p_patch: { attendanceDates: newDates } });
                                         if (error) throw error;
                                       } catch (error) {
-                                        handleFirestoreError(error, OperationType.UPDATE, 'settings/general');
+                                        handleApiError(error, OperationType.UPDATE, 'settings/general');
                                       }
                                     }
                                   }}
@@ -3584,7 +3603,7 @@ enum OperationType {
                                     value={amountPaid || 0}
                                     onChange={async (e) => {
                                       try {
-                                        const { error } = await supabase.from('profiles').update({ amount_paid: Number(e.target.value) }).eq('id', scout.uid);
+                                        const { error } = await apiQuery({ table: 'profiles', method: 'update', data: { amount_paid: Number(e.target.value) }, filters: [{ method: 'eq', column: 'id', value: scout.uid }] });
                                         if (error) throw error;
                                         await logActivity(
                                           'تحديث اشتراك',
@@ -3595,7 +3614,7 @@ enum OperationType {
                                           scout.name
                                         );
                                       } catch (error) {
-                                        handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+                                        handleApiError(error, OperationType.UPDATE, `users/${scout.uid}`);
                                       }
                                     }}
                                     className="w-12 text-center bg-transparent border-b border-gray-300 focus:border-[#4285F4] outline-none"
@@ -3614,7 +3633,7 @@ enum OperationType {
                                   checked={scout.attendance?.[date] || false}
                                   onChange={async (e) => {
                                     try {
-                                      const { error } = await supabase.rpc('set_attendance', { p_user_id: scout.uid, p_date: date, p_present: e.target.checked });
+                                      const { error } = await rpc('set_attendance', { p_user_id: scout.uid, p_date: date, p_present: e.target.checked });
                                       if (error) throw error;
                                       await logActivity(
                                         'تسجيل غياب',
@@ -3625,7 +3644,7 @@ enum OperationType {
                                         scout.name
                                       );
                                     } catch (error) {
-                                      handleFirestoreError(error, OperationType.UPDATE, `users/${scout.uid}`);
+                                      handleApiError(error, OperationType.UPDATE, `users/${scout.uid}`);
                                     }
                                   }}
                                   className="w-5 h-5 rounded border-gray-300 text-[#4285F4] focus:ring-[#4285F4] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3814,7 +3833,7 @@ enum OperationType {
 
                         updatedMaxScores[gradingSelectedBadge] = badgeScores;
 
-                        const { error } = await supabase.rpc('merge_app_settings', {
+                        const { error } = await rpc('merge_app_settings', {
                           p_key: 'badges',
                           p_patch: { requirementMaxScores: updatedMaxScores }
                         });

@@ -23,6 +23,8 @@ model Profile {
   pastWaves          Json      @default("{}") @map("past_waves")
   passedBadges       String[]  @default([]) @map("passed_badges")
   permissions        Json?
+  passwordHash       String?   @map("password_hash")
+  tokenVersion       Int       @default(1) @map("token_version")
   createdAt          DateTime  @default(now()) @map("created_at")
   joinDate           DateTime  @default(now()) @map("join_date")
 

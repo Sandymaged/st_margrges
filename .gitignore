@@ -9,3 +9,12 @@ coverage/
 grep_output.txt
 service-account.json
 migration-temp-passwords.json
+
+ARCHITECTURE.md
+AUDIT_REPORT.md
+DATA_ACCESS_ANALYSIS.md
+PRODUCTION_READINESS_AUDIT.md
+0006_complete_profiles_schema.md
+ROOT_CAUSE_ANALYSIS.md
+SSE_ARCHITECTURE.md
+

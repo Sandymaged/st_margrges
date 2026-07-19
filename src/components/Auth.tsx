@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
 import { usePolling } from '../lib/usePolling';
 import { STAGES, PHONE_REGEX, ScoutProfile, BadgeSettings, Stage, DEFAULT_CATEGORIES, GeneralSettings } from '../types';
 import {
@@ -17,11 +16,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-
-function logAndRethrow(error: unknown, operation: string, path: string): never {
-  console.error(`Supabase error during ${operation} on ${path}:`, error);
-  throw error instanceof Error ? error : new Error(String(error));
-}
+import { login, register, getStoredToken } from '../authClient';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -33,13 +28,11 @@ export default function Auth() {
     scoutGroupName: 'مجموعة مارجرجس الكشفية'
   });
 
-  // Badge Settings
   const [badgeSettings, setBadgeSettings] = useState<BadgeSettings>({
     categories: DEFAULT_CATEGORIES,
     requirements: {}
   });
 
-  // Form fields
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -53,34 +46,44 @@ export default function Auth() {
   const [visibleBadges, setVisibleBadges] = useState<number>(1);
 
   usePolling(async () => {
-    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'badges').maybeSingle();
-    if (error) {
+    try {
+      const res = await fetch('/api/app-settings?key=badges');
+      const result = await res.json();
+      if (!res.ok) {
+        console.warn('Failed to fetch badges settings:', result.error);
+        return;
+      }
+      const value = result.data?.value as any;
+      if (value) {
+        setBadgeSettings({
+          categories: value.categories || DEFAULT_CATEGORIES,
+          requirements: value.requirements || {},
+          requirementMaxScores: value.requirementMaxScores || {},
+          requirementCategories: value.requirementCategories || {}
+        });
+      }
+    } catch (error) {
       console.warn('Failed to fetch badges settings:', error);
-      return;
-    }
-    const value = data?.value as any;
-    if (value) {
-      setBadgeSettings({
-        categories: value.categories || DEFAULT_CATEGORIES,
-        requirements: value.requirements || {},
-        requirementMaxScores: value.requirementMaxScores || {},
-        requirementCategories: value.requirementCategories || {}
-      });
     }
   }, 10000);
 
   usePolling(async () => {
-    const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'general').maybeSingle();
-    if (error) {
+    try {
+      const res = await fetch('/api/app-settings?key=general');
+      const result = await res.json();
+      if (!res.ok) {
+        console.warn('Failed to fetch general settings:', result.error);
+        return;
+      }
+      const value = result.data?.value as GeneralSettings | undefined;
+      if (value) {
+        setGeneralSettings({
+          ...value,
+          logoUrl: '/syncc.png'
+        });
+      }
+    } catch (error) {
       console.warn('Failed to fetch general settings:', error);
-      return;
-    }
-    const value = data?.value as GeneralSettings | undefined;
-    if (value) {
-      setGeneralSettings({
-        ...value,
-        logoUrl: '/syncc.png'
-      });
     }
   }, 10000);
 
@@ -96,7 +99,6 @@ export default function Auth() {
     }
   }, [generalSettings.allowedRegistrationStages, stage]);
 
-  // Helper to normalize Arabic text for comparison
   const normalizeArabic = (str: string | undefined | null) => {
     if (!str) return '';
     return str.replace(/أ|إ|آ/g, 'ا')
@@ -105,7 +107,6 @@ export default function Auth() {
               .trim();
   };
 
-  // Helper to get badges for a category and stage
   const getAvailableBadges = (categoryId: string, scoutStage: Stage | '') => {
     const category = (badgeSettings.categories || []).find(c => c.id === categoryId);
     if (!category) return [];
@@ -123,7 +124,6 @@ export default function Auth() {
     return Array.from(badges);
   };
 
-  // Update badge selections when settings or stage/category change
   useEffect(() => {
     if (selectedCategory1) {
       const badges1 = getAvailableBadges(selectedCategory1, stage);
@@ -144,21 +144,14 @@ export default function Auth() {
     }
   }, [badgeSettings, stage, selectedCategory1, selectedCategory2]);
 
-  const [currentUser, setCurrentUser] = useState<{ id: string; email?: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; phone?: string } | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
-        setCurrentUser({ id: data.user.id, email: data.user.email ?? undefined });
-        setIsCompletingProfile(true);
-        setIsLogin(false);
-        // Pre-fill phone if possible from email
-        const emailPhone = data.user.email?.split('@')[0];
-        if (emailPhone && PHONE_REGEX.test(emailPhone)) {
-          setPhone(emailPhone);
-        }
-      }
-    });
+    const storedUser = getStoredToken();
+    if (storedUser) {
+      setIsCompletingProfile(true);
+      setIsLogin(false);
+    }
   }, []);
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -221,13 +214,15 @@ export default function Auth() {
         throw new Error('رقم الهاتف يجب أن يكون 11 رقماً ويبدأ بـ 010 أو 011 أو 012 أو 015');
       }
 
-      const fakeEmail = `${phone}@scouts.local`;
-
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email: fakeEmail, password: trimmedPassword });
-        if (error) throw error;
+        const result = await login(phone, trimmedPassword);
+        if (result.requiresPasswordSetup) {
+          setError(result.message || 'هذا الحساب لا يحتوي على كلمة مرور. يرجى استخدام خيار "نسيت كلمة المرور" للتواصل مع المسؤول.');
+          return;
+        }
+        // Force page reload to reinitialize app state with the new session
+        window.location.reload();
       } else {
-        // Sign Up or Complete Profile Flow
         const selectedBadges = [badge1];
         if (visibleBadges >= 2 && badge2) selectedBadges.push(badge2);
 
@@ -236,44 +231,23 @@ export default function Auth() {
           throw new Error('لا يمكن اختيار نفس الشارة أكثر من مرة');
         }
 
-        let userId: string;
-        if (isCompletingProfile && currentUser) {
-          userId = currentUser.id;
-        } else {
-          const { data, error } = await supabase.auth.signUp({ email: fakeEmail, password: trimmedPassword });
-          if (error) throw error;
-          if (!data.user) throw new Error('حدث خطأ أثناء إنشاء الحساب.');
-          userId = data.user.id;
-        }
-
-        // Create profile
-        const profile = {
-          id: userId,
+        await register({
+          phone,
+          password: trimmedPassword,
           name,
-          email: fakeEmail,
-          number: phone,
           stage,
-          badges: {
-            badge1: { name: badge1, progress: 0, notes: '', completedRequirements: [] },
-            badge2: { name: visibleBadges >= 2 ? badge2 : '', progress: 0, notes: '', completedRequirements: [] },
-            badge3: { name: '', progress: 0, notes: '', completedRequirements: [] },
-          },
-          role: 'scout',
-          is_verified: true,
-          show_welcome_groups: true,
-        };
+          badge1,
+          badge2: visibleBadges >= 2 ? badge2 : undefined,
+        });
 
-        const { error: insertError } = await supabase.from('profiles').insert(profile);
-        if (insertError) {
-          logAndRethrow(insertError, 'insert', `profiles/${userId}`);
-        }
+        window.location.reload();
       }
     } catch (err: any) {
       console.error('Auth error:', err);
       const message: string = err?.message || '';
       if (message.includes('already registered') || message.includes('already exists') || err?.code === '23505') {
         setError('هذا الرقم مسجل بالفعل');
-      } else if (message.includes('Invalid login credentials')) {
+      } else if (message.includes('غير صحيحة')) {
         setError('رقم الهاتف أو كلمة المرور غير صحيحة');
       } else {
         setError(message || 'حدث خطأ ما، يرجى المحاولة مرة أخرى');
@@ -283,7 +257,6 @@ export default function Auth() {
     }
   };
 
-  const scoutBadges = badgeSettings.categories.find(c => c.id === 'scout')?.badges || [];
   const allBadges = badgeSettings.categories.flatMap(c => c.badges);
 
   return (
@@ -372,7 +345,6 @@ export default function Auth() {
               </>
             ) : (
               <>
-                {/* Signup Fields */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm font-bold text-gray-700">
                     <UserIcon size={16} className="text-[#4285F4]" /> الاسم بالكامل
@@ -458,7 +430,6 @@ export default function Auth() {
                     )}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Badge 1 */}
                     <div className="space-y-3 relative p-4 md:p-0 bg-gray-50 md:bg-transparent rounded-xl border md:border-none border-gray-100">
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-gray-700">شارة 1</label>
@@ -492,7 +463,6 @@ export default function Auth() {
                       </div>
                     </div>
 
-                    {/* Badge 2 */}
                     {visibleBadges >= 2 && (
                       <div className="space-y-3 relative p-4 md:p-0 bg-gray-50 md:bg-transparent rounded-xl border md:border-none border-gray-100">
                         {visibleBadges === 2 && (

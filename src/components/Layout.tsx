@@ -2,12 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { LogOut, User as UserIcon, Home, LayoutDashboard, Menu, X, ChevronDown, Camera, Edit2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { User } from '@supabase/supabase-js';
 import { GeneralSettings, ScoutProfile } from '../types';
+import { logout as authLogout, getStoredToken } from '../authClient';
 
 interface LayoutProps {
   children: React.ReactNode;
-  user: User | null;
+  user: { id: string; phone: string; role: string } | null;
   profile: ScoutProfile | null;
   view?: 'profile' | 'dashboard';
   setView?: (view: 'profile' | 'dashboard') => void;
@@ -28,7 +28,7 @@ export default function Layout({ children, user, profile, view, setView, general
       setTimeout(() => {
         setView('profile');
         setIsNavigating(false);
-      }, 600); // Simulate a brief loading delay
+      }, 600);
     }
   };
 
@@ -45,7 +45,6 @@ export default function Layout({ children, user, profile, view, setView, general
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Basic validation
     if (!file.type.startsWith('image/')) {
       alert('يرجى اختيار ملف صورة');
       return;
@@ -64,11 +63,15 @@ export default function Layout({ children, user, profile, view, setView, general
       if (uploadError) throw uploadError;
 
       const { data: publicUrlData } = supabase.storage.from('assets').getPublicUrl('settings/logo');
-      const { error: rpcError } = await supabase.rpc('merge_app_settings', {
-        p_key: 'general',
-        p_patch: { logoUrl: `${publicUrlData.publicUrl}?t=${Date.now()}` },
-      });
-      if (rpcError) throw rpcError;
+      const token = getStoredToken();
+      const { data: rpcResult } = await (await fetch('/api/rpc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          function: 'merge_app_settings',
+          params: { p_key: 'general', p_patch: { logoUrl: `${publicUrlData.publicUrl}?t=${Date.now()}` } }
+        }),
+      })).json();
     } catch (error) {
       console.error('Error uploading logo:', error);
       alert('حدث خطأ أثناء رفع اللوجو');
@@ -81,20 +84,22 @@ export default function Layout({ children, user, profile, view, setView, general
   const handleUpdateGroupName = async () => {
     const newName = window.prompt('أدخل اسم المجموعة الجديد:', generalSettings.scoutGroupName);
     if (newName && newName !== generalSettings.scoutGroupName) {
-      const { error } = await supabase.rpc('merge_app_settings', {
-        p_key: 'general',
-        p_patch: { scoutGroupName: newName },
-      });
-      if (error) {
-        console.error('Error updating group name:', error);
-        alert('حدث خطأ أثناء تحديث اسم المجموعة');
-      }
+      const token = getStoredToken();
+      const { data: rpcResult } = await (await fetch('/api/rpc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          function: 'merge_app_settings',
+          params: { p_key: 'general', p_patch: { scoutGroupName: newName } }
+        }),
+      })).json();
     }
   };
 
   const handleLogout = () => {
-    supabase.auth.signOut();
+    authLogout();
     setIsMenuOpen(false);
+    window.location.reload();
   };
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
@@ -111,7 +116,6 @@ export default function Layout({ children, user, profile, view, setView, general
 
   return (
     <div className="min-h-screen bg-[#F0F2F5] font-sans" dir="rtl">
-      {/* Navigation Loading Overlay */}
       <AnimatePresence>
         {isNavigating && (
           <motion.div
@@ -135,7 +139,6 @@ export default function Layout({ children, user, profile, view, setView, general
         )}
       </AnimatePresence>
 
-      {/* Header */}
       <header className="bg-[#4285F4] text-white shadow-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -175,7 +178,7 @@ export default function Layout({ children, user, profile, view, setView, general
                     <UserIcon size={14} />
                   </div>
                   <span className="text-sm font-bold">
-                    {profile?.name || profile?.number || user.email?.split('@')[0] || 'مستخدم'}
+                    {profile?.name || profile?.number || user.phone || 'مستخدم'}
                   </span>
                 </div>
 
@@ -208,7 +211,7 @@ export default function Layout({ children, user, profile, view, setView, general
                           {profile?.name || 'مستخدم'}
                         </span>
                         <span className="text-[10px] text-gray-400 font-bold">
-                          {profile?.number || user.email?.split('@')[0]}
+                          {profile?.number || user.phone}
                         </span>
                       </div>
                     </div>
@@ -256,7 +259,6 @@ export default function Layout({ children, user, profile, view, setView, general
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8">
         {children}
       </main>
