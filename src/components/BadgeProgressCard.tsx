@@ -41,7 +41,7 @@ export default function BadgeProgressCard({
   // iterated, so that check can never fail on formatting differences either.
   const normalizeReq = (s: string) => s.trim().replace(/\s+/g, ' ');
   const completedSet = new Set((badge.completedRequirements || []).map(normalizeReq));
-  const completedReqs = showResults ? requirements.filter(req => completedSet.has(normalizeReq(req))) : [];
+  const completedReqs = requirements.filter(req => completedSet.has(normalizeReq(req)));
   
   // We rely on isPassed from the parent to determine full completion.
   const isFullyCompleted = showResults && hasReqs && isPassed;
@@ -135,15 +135,9 @@ export default function BadgeProgressCard({
                           <span className={`text-sm font-bold ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
                             {req}
                           </span>
-                          {!showResults ? (
-                            <span className="text-xs font-bold mt-2 text-purple-600">
-                              قيد التقييم
-                            </span>
-                          ) : (
-                            <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                              {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
-                            </span>
-                          )}
+                          <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                            {isCompleted ? 'تم التسليم' : 'لم يتم التسليم'}
+                          </span>
                         </div>
                       </div>
                     );
