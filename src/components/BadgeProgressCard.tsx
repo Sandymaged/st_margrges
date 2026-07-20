@@ -28,7 +28,20 @@ export default function BadgeProgressCard({
 }: BadgeProgressCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasReqs = requirements.length > 0;
-  const completedReqs = showResults ? (badge.completedRequirements || []).filter(r => requirements.includes(r)) : [];
+  // Match by normalized text (trim + collapse internal whitespace) instead of exact
+  // string equality. completedRequirements is written once at grading time and never
+  // touched again, while `requirements` (the current canonical wording) can pick up
+  // an incidental extra space or trailing whitespace whenever an admin re-saves the
+  // badge's requirement list - since that no longer matches byte-for-byte, a strict
+  // `.includes()` here would silently drop an already-graded item from view even
+  // though completedRequirements in the database still correctly has it. Building
+  // completedReqs by filtering `requirements` itself (rather than filtering
+  // completedRequirements down) also guarantees the strings used below in
+  // `completedReqs.includes(req)` are the exact same string instances being
+  // iterated, so that check can never fail on formatting differences either.
+  const normalizeReq = (s: string) => s.trim().replace(/\s+/g, ' ');
+  const completedSet = new Set((badge.completedRequirements || []).map(normalizeReq));
+  const completedReqs = showResults ? requirements.filter(req => completedSet.has(normalizeReq(req))) : [];
   
   // We rely on isPassed from the parent to determine full completion.
   const isFullyCompleted = showResults && hasReqs && isPassed;
