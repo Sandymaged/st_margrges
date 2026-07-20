@@ -4,6 +4,7 @@
  * Manages JWT token storage and provides login/register/logout/getSession
  * that match the existing call patterns used throughout the app.
  */
+import { rowToScoutProfile } from './lib/mappers';
 
 const TOKEN_KEY = 'app_auth_token';
 const USER_KEY = 'app_auth_user';
@@ -59,7 +60,7 @@ export async function login(phone: string, password: string): Promise<LoginResul
 
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-  return data;
+  return { ...data, profile: data.profile ? rowToScoutProfile(data.profile) : null };
 }
 
 export async function register(params: {
@@ -79,7 +80,7 @@ export async function register(params: {
   if (!res.ok) throw new Error(data.error || 'فشل إنشاء الحساب');
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-  return data;
+  return { ...data, profile: data.profile ? rowToScoutProfile(data.profile) : null };
 }
 
 export async function logout(): Promise<void> {
@@ -111,7 +112,7 @@ export async function getSession(): Promise<AuthSession | null> {
       return null;
     }
     const data = await res.json();
-    return { token, user: data.user, profile: data.profile };
+    return { token, user: data.user, profile: data.profile ? rowToScoutProfile(data.profile) : null };
   } catch {
     clearSession();
     return null;
