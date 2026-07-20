@@ -3616,17 +3616,23 @@ enum OperationType {
                                     type="number"
                                     value={amountPaid || 0}
                                     onChange={async (e) => {
+                                      const newAmount = Number(e.target.value);
                                       try {
-                                        const { error } = await apiQuery({ table: 'profiles', method: 'update', data: { amount_paid: Number(e.target.value) }, filters: [{ method: 'eq', column: 'id', value: scout.uid }] });
+                                        const { error } = await apiQuery({ table: 'profiles', method: 'update', data: { amount_paid: newAmount }, filters: [{ method: 'eq', column: 'id', value: scout.uid }] });
                                         if (error) throw error;
-                                        await logActivity(
+                                        // Reflect the saved value immediately instead of waiting up to 6s
+                                        // for the next poll (usePolling(fetchScouts, 6000)) - otherwise this
+                                        // controlled input keeps snapping back to the old value on every
+                                        // re-render until the poll catches up.
+                                        setScouts(prev => prev.map(s => (s.uid === scout.uid ? { ...s, amountPaid: newAmount } : s)));
+                                        logActivity(
                                           'تحديث اشتراك',
                                           `تم تحديث المبلغ المدفوع إلى ${e.target.value}`,
                                           currentProfile.uid,
                                           currentProfile.name || 'مسؤول',
                                           scout.uid,
                                           scout.name
-                                        );
+                                        ).catch(err => console.error('Failed to log activity:', err));
                                       } catch (error) {
                                         handleApiError(error, OperationType.UPDATE, `users/${scout.uid}`);
                                       }
@@ -3646,17 +3652,22 @@ enum OperationType {
                                   disabled={!canManageAttendance}
                                   checked={scout.attendance?.[date] || false}
                                   onChange={async (e) => {
+                                    const present = e.target.checked;
                                     try {
-                                      const { error } = await rpc('set_attendance', { p_user_id: scout.uid, p_date: date, p_present: e.target.checked });
+                                      const { error } = await rpc('set_attendance', { p_user_id: scout.uid, p_date: date, p_present: present });
                                       if (error) throw error;
-                                      await logActivity(
+                                      // Same fix as the amount_paid field above: reflect the saved value
+                                      // immediately instead of waiting up to 6s for the next poll, otherwise
+                                      // this controlled checkbox keeps snapping back until the poll catches up.
+                                      setScouts(prev => prev.map(s => (s.uid === scout.uid ? { ...s, attendance: { ...s.attendance, [date]: present } } : s)));
+                                      logActivity(
                                         'تسجيل غياب',
-                                        `تم ${e.target.checked ? 'تسجيل حضور' : 'إلغاء حضور'} ليوم ${date}`,
+                                        `تم ${present ? 'تسجيل حضور' : 'إلغاء حضور'} ليوم ${date}`,
                                         currentProfile.uid,
                                         currentProfile.name || 'مسؤول',
                                         scout.uid,
                                         scout.name
-                                      );
+                                      ).catch(err => console.error('Failed to log activity:', err));
                                     } catch (error) {
                                       handleApiError(error, OperationType.UPDATE, `users/${scout.uid}`);
                                     }
