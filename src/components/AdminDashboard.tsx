@@ -1646,6 +1646,21 @@ enum OperationType {
       });
       if (error) throw error;
 
+      if (textChanged) {
+        // Migrate any scout who was already graded "done" under the old wording,
+        // so their completed status survives this text edit instead of silently
+        // vanishing (old text will never again match the new canonical text).
+        const { error: renameError } = await rpc('rename_badge_requirement', {
+          p_badge_name: badgeName,
+          p_old_text: oldText,
+          p_new_text: trimmedNew
+        });
+        if (renameError) {
+          console.error('Failed to migrate completed requirement text:', renameError);
+          setMessage({ type: 'error', text: 'تم تعديل البند، لكن حدث خطأ أثناء تحديث حالة الكشافة اللي كانوا معلّمين عليه بالنص القديم' });
+        }
+      }
+
       setBadgeSettings(prev => ({ ...prev, requirements, requirementCategories, requirementMaxScores }));
 
       setEditingRequirement(null);
@@ -4269,7 +4284,7 @@ enum OperationType {
                                         <span className="text-sm font-bold text-gray-700 leading-tight">{req}</span>
                                         {maxScore && maxScore > 0 && <span className="text-xs text-gray-500 mt-1">من {maxScore}</span>}
                                       </div>
-                                      <div className="flex items-center flex-row-reverse gap-2">
+                                      <div className="flex items-center flex-row-reverse gap-2 flex-wrap justify-start">
                                         {maxScore && maxScore > 0 && (
                                           <div className="w-[70px]">
                                             <ScoreInput
@@ -4293,38 +4308,35 @@ enum OperationType {
                                           <span className="text-[10px] font-bold text-orange-400 bg-orange-400/10 px-2 py-1 rounded">لا تقيم نفسك</span>
                                         ) : (
                                           <>
-                                            {maxScore && maxScore > 0 ? (
-                                              <button
-                                                onClick={() => {
-                                                  if (!canEdit) return;
-                                                  setMessage({ type: 'success', text: 'تم حفظ التعديلات' });
-                                                }}
-                                                disabled={!canEdit}
-                                                className="text-xs font-bold border border-gray-300 text-gray-600 bg-white px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                                              >
-                                                حفظ
-                                              </button>
-                                            ) : (
-                                              <button
-                                                onClick={() => {
-                                                  if (!canEdit) return;
-                                                  const newCompleted = isCompleted
-                                                    ? completedReqs.filter(r => r !== req)
-                                                    : [...completedReqs, req];
-                                                  handleUpdateScoutBadge(scout, badgeKey, {
-                                                    completedRequirements: newCompleted
-                                                  });
-                                                }}
-                                                disabled={!canEdit}
-                                                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
-                                                  isCompleted
-                                                    ? 'bg-transparent border border-gray-300 text-transparent'
-                                                    : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'
-                                                } ${!canEdit && 'opacity-50 cursor-not-allowed'} ${isCompleted && 'bg-[#34A853] !border-none text-white'}`}
-                                              >
-                                                <Check size={18} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
-                                              </button>
-                                            )}
+                                            <button
+                                              onClick={() => {
+                                                if (!canEdit) return;
+                                                setMessage({ type: 'success', text: 'تم حفظ التعديلات' });
+                                              }}
+                                              disabled={!canEdit}
+                                              className="text-xs font-bold border border-gray-300 text-gray-600 bg-white px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                            >
+                                              حفظ
+                                            </button>
+                                            <button
+                                              onClick={() => {
+                                                if (!canEdit) return;
+                                                const newCompleted = isCompleted
+                                                  ? completedReqs.filter(r => r !== req)
+                                                  : [...completedReqs, req];
+                                                handleUpdateScoutBadge(scout, badgeKey, {
+                                                  completedRequirements: newCompleted
+                                                });
+                                              }}
+                                              disabled={!canEdit}
+                                              className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                                                isCompleted
+                                                  ? 'bg-[#34A853] text-white shadow-sm'
+                                                  : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'
+                                              } ${!canEdit && 'opacity-50 cursor-not-allowed'}`}
+                                            >
+                                              <Check size={18} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
+                                            </button>
                                           </>
                                         )}
                                       </div>
