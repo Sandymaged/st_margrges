@@ -182,8 +182,38 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
   // updates instantly (via optimisticBadgeUpdates below), so nothing about the
   // admin's experience changes - only the number of network writes drops.
   const [optimisticBadgeUpdates, setOptimisticBadgeUpdates] = useState<Record<string, Partial<BadgeProgress>>>({});
-  const pendingBadgeUpdatesRef = useRef<Record<string, { scout: ScoutProfile; badgeKey: 'badge1' | 'badge2' | 'badge3'; merged: Partial<BadgeProgress> }>>({});
+  interface PendingBadgeEntry {
+    scoutUid: string;
+    scoutStage: Stage;
+    badgeKey: 'badge1' | 'badge2' | 'badge3';
+    badgeName: string;
+    // Snapshot of the badge's saved state at the moment this pending edit was first
+    // created - used to diff against `merged` so only actually-changed fields get
+    // sent, instead of resending everything (which is what let two offline admins'
+    // edits to different requirements silently overwrite each other before).
+    baselineCompleted: string[];
+    baselineScores: Record<string, number>;
+    baselineNotes: string;
+    merged: Partial<BadgeProgress>;
+  }
+  const PENDING_BADGE_STORAGE_KEY = 'pending_badge_grading_updates';
+  const pendingBadgeUpdatesRef = useRef<Record<string, PendingBadgeEntry>>({});
   const pendingBadgeTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const persistPendingBadgeUpdates = () => {
+    try {
+      const entries = pendingBadgeUpdatesRef.current;
+      if (Object.keys(entries).length === 0) {
+        localStorage.removeItem(PENDING_BADGE_STORAGE_KEY);
+      } else {
+        localStorage.setItem(PENDING_BADGE_STORAGE_KEY, JSON.stringify(entries));
+      }
+    } catch (e) {
+      // localStorage can fail (private browsing, quota) - the in-memory ref still
+      // works for the current tab session, it just won't survive a reload while offline.
+      console.warn('Failed to persist pending badge updates:', e);
+    }
+  };
 
   useEffect(() => {
     const handleOnline = () => {
@@ -672,7 +702,7 @@ enum OperationType {
           row[req] = scores[req] || 0;
         });
 
-        row['النسبة المئوية'] = `${Math.round(badge.progress || 0)}%`;
+        row['النسبة المئوية'] = `${Math.round(calculateBadgeProgress(gradingSelectedBadge, stageReqs, badge.completedRequirements || [], scores))}%`;
         row['النتيجة'] = checkBadgePassStatus(gradingSelectedBadge, stageReqs, badge.completedRequirements || [], scores) ? 'اجتاز' : 'لم يجتز';
         return row;
       });
@@ -1277,82 +1307,95 @@ enum OperationType {
   // instead of once per single edit, and no longer writes a separate activity_logs
   // entry for this routine, high-frequency action.
   const flushBadgeUpdate = async (key: string) => {
-    const pending = pendingBadgeUpdatesRef.current[key];
     delete pendingBadgeTimersRef.current[key];
+    const pending = pendingBadgeUpdatesRef.current[key];
     if (!pending) return;
-    delete pendingBadgeUpdatesRef.current[key];
 
-    const { scout, badgeKey, merged } = pending;
+    const { scoutUid, scoutStage, badgeKey, badgeName, baselineCompleted, baselineScores, baselineNotes, merged } = pending;
+
     try {
-      const currentBadge = scout.badges[badgeKey];
-      const notesChanged = merged.notes !== undefined && merged.notes !== currentBadge.notes;
-      let confirmedBadge: BadgeProgress | null = null;
+      const ops: Promise<{ error: any }>[] = [];
 
-      if (merged.requirementScores !== undefined || notesChanged) {
-        // No dedicated RPC exists for setting requirementScores or notes on their own
-        // (only whole-slot replace via update_badge_slot, or arrayUnion/arrayRemove-style
-        // RPCs for completedRequirements) - so this replaces the whole slot atomically
-        // in one call, same blast radius as the old dot-path updateDoc call which also
-        // touched every field of this one badge together.
-        const reqs = getScoutBadgeRequirements(currentBadge.name, scout.stage);
-        const completedReqs = merged.completedRequirements !== undefined ? merged.completedRequirements : (currentBadge.completedRequirements || []);
-        const scores = merged.requirementScores !== undefined ? merged.requirementScores : (currentBadge.requirementScores || {});
-        const newProgress = calculateBadgeProgress(currentBadge.name, reqs, completedReqs, scores);
+      // Scores: send only the specific requirement keys whose value actually changed
+      // vs the baseline, via the atomic per-requirement RPC. This is what makes it
+      // safe for two admins (or one admin across an offline gap) to grade different
+      // requirements of the same badge without one overwriting the other.
+      if (merged.requirementScores !== undefined) {
+        Object.entries(merged.requirementScores).forEach(([reqText, score]) => {
+          if (score !== baselineScores[reqText]) {
+            ops.push(rpc('set_requirement_score', { p_user_id: scoutUid, p_slot: badgeKey, p_requirement: reqText, p_score: score }));
+          }
+        });
+      }
 
-        const newBadge: BadgeProgress = {
-          name: currentBadge.name,
-          progress: newProgress,
-          notes: merged.notes !== undefined ? merged.notes : currentBadge.notes,
-          completedRequirements: completedReqs,
-          requirementScores: scores
-        };
-        const { error } = await rpc('update_badge_slot', { p_user_id: scout.uid, p_slot: badgeKey, p_badge: newBadge });
-        if (error) throw error;
-        confirmedBadge = newBadge;
-      } else if (merged.completedRequirements !== undefined) {
-        // Pure checkbox toggles: use the same arrayUnion/arrayRemove-equivalent RPCs
-        // used elsewhere in this file, so this can't clobber a concurrent admin's edit
-        // to a different requirement on the same badge.
-        const currentCompleted = currentBadge.completedRequirements || [];
+      // Notes: a single value per badge, so a plain atomic set is enough (no per-item
+      // conflict is possible the way there is with scores/checkboxes).
+      if (merged.notes !== undefined && merged.notes !== baselineNotes) {
+        ops.push(rpc('set_badge_notes', { p_user_id: scoutUid, p_slot: badgeKey, p_notes: merged.notes }));
+      }
+
+      // Checkbox toggles: same arrayUnion/arrayRemove-equivalent RPCs as before, still
+      // safe for concurrent edits to different requirements.
+      if (merged.completedRequirements !== undefined) {
         const newCompleted = merged.completedRequirements;
-        const added = newCompleted.filter(r => !currentCompleted.includes(r));
-        const removed = currentCompleted.filter(r => !newCompleted.includes(r));
+        const added = newCompleted.filter(r => !baselineCompleted.includes(r));
+        const removed = baselineCompleted.filter(r => !newCompleted.includes(r));
+        added.forEach(req => ops.push(rpc('add_completed_requirement', { p_user_id: scoutUid, p_slot: badgeKey, p_requirement: req })));
+        removed.forEach(req => ops.push(rpc('remove_completed_requirement', { p_user_id: scoutUid, p_slot: badgeKey, p_requirement: req })));
+      }
 
-        const ops = [
-          ...added.map(req => rpc('add_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req })),
-          ...removed.map(req => rpc('remove_completed_requirement', { p_user_id: scout.uid, p_slot: badgeKey, p_requirement: req }))
-        ];
-
-        if (ops.length === 0) return;
-        const results = await Promise.all(ops);
-        const failed = results.find(r => r.error);
-        if (failed?.error) throw failed.error;
-
-        const reqs = getScoutBadgeRequirements(currentBadge.name, scout.stage);
-        const newProgress = calculateBadgeProgress(currentBadge.name, reqs, newCompleted, currentBadge.requirementScores || {});
-        confirmedBadge = { ...currentBadge, completedRequirements: newCompleted, progress: newProgress };
-      } else {
+      if (ops.length === 0) {
+        // Nothing left that actually differs from the last confirmed state (e.g. the
+        // admin toggled a checkbox back to its original value before it synced).
+        delete pendingBadgeUpdatesRef.current[key];
+        persistPendingBadgeUpdates();
+        setOptimisticBadgeUpdates(prev => {
+          if (!(key in prev)) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
         return;
       }
 
-      // Write the now-confirmed value straight into `scouts` instead of waiting up to
-      // 6s for the next poll (see usePolling(fetchScouts, 6000) below) - otherwise the
-      // optimistic-overlay cleanup in `finally` leaves a window where the UI falls back
-      // to this stale pre-edit value, making a successfully-saved change look like it
-      // "didn't go through".
-      const finalBadge = confirmedBadge;
-      setScouts(prev => prev.map(s => (s.uid === scout.uid ? { ...s, badges: { ...s.badges, [badgeKey]: finalBadge } } : s)));
+      const results = await Promise.all(ops);
+      const failed = results.find(r => r.error);
+      if (failed?.error) throw failed.error;
 
-      setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
-    } catch (error) {
-      handleApiError(error, OperationType.UPDATE, `users/${scout.uid}`);
-      setMessage({ type: 'error', text: 'حدث خطأ أثناء حفظ التقييم' });
-    } finally {
+      // Everything synced - compute the confirmed final badge state and write it into
+      // `scouts` immediately (see the comment on the equivalent step in earlier fixes:
+      // this avoids waiting up to 6s for the next poll), then drop this key from the
+      // pending queue for good.
+      const finalCompleted = merged.completedRequirements !== undefined ? merged.completedRequirements : baselineCompleted;
+      const finalScores = merged.requirementScores !== undefined ? merged.requirementScores : baselineScores;
+      const finalNotes = merged.notes !== undefined ? merged.notes : baselineNotes;
+      const reqs = getScoutBadgeRequirements(badgeName, scoutStage);
+      const newProgress = calculateBadgeProgress(badgeName, reqs, finalCompleted, finalScores);
+      const finalBadge: BadgeProgress = { name: badgeName, progress: newProgress, notes: finalNotes, completedRequirements: finalCompleted, requirementScores: finalScores };
+
+      setScouts(prev => prev.map(s => (s.uid === scoutUid ? { ...s, badges: { ...s.badges, [badgeKey]: finalBadge } } : s)));
+
+      delete pendingBadgeUpdatesRef.current[key];
+      persistPendingBadgeUpdates();
       setOptimisticBadgeUpdates(prev => {
         if (!(key in prev)) return prev;
         const next = { ...prev };
         delete next[key];
         return next;
+      });
+      setMessage({ type: 'success', text: 'تم حفظ التقييم بنجاح' });
+    } catch (error) {
+      // Deliberately do NOT delete pendingBadgeUpdatesRef.current[key] or clear the
+      // optimistic overlay here - that was the old bug: a failed (e.g. offline) save
+      // silently discarded the admin's edit instead of keeping it queued. It's already
+      // persisted to localStorage via persistPendingBadgeUpdates(), and the 'online'
+      // listener below (and the on-mount rehydration) will retry it automatically.
+      handleApiError(error, OperationType.UPDATE, `users/${scoutUid}`);
+      setMessage({
+        type: 'error',
+        text: navigator.onLine
+          ? 'حدث خطأ أثناء حفظ التقييم'
+          : 'التقييم محفوظ محليًا على جهازك وهيتزامن تلقائيًا لما النت يرجع'
       });
     }
   };
@@ -1364,7 +1407,9 @@ enum OperationType {
   // appear on screen instantly regardless, so the grading experience is unchanged.
   const handleUpdateScoutBadge = (scout: ScoutProfile, badgeKey: 'badge1' | 'badge2' | 'badge3', updates: Partial<BadgeProgress>) => {
     const key = `${scout.uid}_${badgeKey}`;
-    const existingMerged = pendingBadgeUpdatesRef.current[key]?.merged || {};
+    const currentBadge = scout.badges[badgeKey];
+    const existing = pendingBadgeUpdatesRef.current[key];
+    const existingMerged = existing?.merged || {};
 
     const merged: Partial<BadgeProgress> = {
       ...existingMerged,
@@ -1373,7 +1418,19 @@ enum OperationType {
       completedRequirements: updates.completedRequirements !== undefined ? updates.completedRequirements : existingMerged.completedRequirements,
     };
 
-    pendingBadgeUpdatesRef.current[key] = { scout, badgeKey, merged };
+    // Only capture the baseline once, the first time this key gets a pending edit -
+    // it has to represent the last confirmed-saved state, not shift on every keystroke.
+    pendingBadgeUpdatesRef.current[key] = existing ? { ...existing, merged } : {
+      scoutUid: scout.uid,
+      scoutStage: scout.stage,
+      badgeKey,
+      badgeName: currentBadge.name,
+      baselineCompleted: currentBadge.completedRequirements || [],
+      baselineScores: currentBadge.requirementScores || {},
+      baselineNotes: currentBadge.notes,
+      merged,
+    };
+    persistPendingBadgeUpdates();
     setOptimisticBadgeUpdates(prev => ({ ...prev, [key]: merged }));
 
     if (pendingBadgeTimersRef.current[key]) {
@@ -1383,6 +1440,34 @@ enum OperationType {
       flushBadgeUpdate(key);
     }, 1000);
   };
+
+  // Rehydrate any edits that never made it to the server (tab closed/reloaded while
+  // offline, or the request failed) and try flushing them once the scouts list is
+  // loaded - and again automatically whenever the connection comes back.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PENDING_BADGE_STORAGE_KEY);
+      if (raw) {
+        const entries: Record<string, PendingBadgeEntry> = JSON.parse(raw);
+        pendingBadgeUpdatesRef.current = entries;
+        setOptimisticBadgeUpdates(prev => {
+          const next = { ...prev };
+          Object.entries(entries).forEach(([key, entry]) => { next[key] = entry.merged; });
+          return next;
+        });
+        Object.keys(entries).forEach(key => { flushBadgeUpdate(key); });
+      }
+    } catch (e) {
+      console.warn('Failed to rehydrate pending badge updates:', e);
+    }
+
+    const retryPending = () => {
+      Object.keys(pendingBadgeUpdatesRef.current).forEach(key => { flushBadgeUpdate(key); });
+    };
+    window.addEventListener('online', retryPending);
+    return () => window.removeEventListener('online', retryPending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Safety net: if the admin navigates away/closes the tab while an edit is still
   // waiting to be written (within that ~1s window), flush it immediately instead of
@@ -1645,6 +1730,21 @@ enum OperationType {
         p_patch: { requirements, requirementCategories, requirementMaxScores }
       });
       if (error) throw error;
+
+      if (textChanged) {
+        // Migrate any scout who was already graded "done" under the old wording,
+        // so their completed status survives this text edit instead of silently
+        // vanishing (old text will never again match the new canonical text).
+        const { error: renameError } = await rpc('rename_badge_requirement', {
+          p_badge_name: badgeName,
+          p_old_text: oldText,
+          p_new_text: trimmedNew
+        });
+        if (renameError) {
+          console.error('Failed to migrate completed requirement text:', renameError);
+          setMessage({ type: 'error', text: 'تم تعديل البند، لكن حدث خطأ أثناء تحديث حالة الكشافة اللي كانوا معلّمين عليه بالنص القديم' });
+        }
+      }
 
       setBadgeSettings(prev => ({ ...prev, requirements, requirementCategories, requirementMaxScores }));
 
@@ -4269,7 +4369,7 @@ enum OperationType {
                                         <span className="text-sm font-bold text-gray-700 leading-tight">{req}</span>
                                         {maxScore && maxScore > 0 && <span className="text-xs text-gray-500 mt-1">من {maxScore}</span>}
                                       </div>
-                                      <div className="flex items-center flex-row-reverse gap-2">
+                                      <div className="flex items-center flex-row-reverse gap-2 flex-wrap justify-start">
                                         {maxScore && maxScore > 0 && (
                                           <div className="w-[70px]">
                                             <ScoreInput
@@ -4293,38 +4393,35 @@ enum OperationType {
                                           <span className="text-[10px] font-bold text-orange-400 bg-orange-400/10 px-2 py-1 rounded">لا تقيم نفسك</span>
                                         ) : (
                                           <>
-                                            {maxScore && maxScore > 0 ? (
-                                              <button
-                                                onClick={() => {
-                                                  if (!canEdit) return;
-                                                  setMessage({ type: 'success', text: 'تم حفظ التعديلات' });
-                                                }}
-                                                disabled={!canEdit}
-                                                className="text-xs font-bold border border-gray-300 text-gray-600 bg-white px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                                              >
-                                                حفظ
-                                              </button>
-                                            ) : (
-                                              <button
-                                                onClick={() => {
-                                                  if (!canEdit) return;
-                                                  const newCompleted = isCompleted
-                                                    ? completedReqs.filter(r => r !== req)
-                                                    : [...completedReqs, req];
-                                                  handleUpdateScoutBadge(scout, badgeKey, {
-                                                    completedRequirements: newCompleted
-                                                  });
-                                                }}
-                                                disabled={!canEdit}
-                                                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
-                                                  isCompleted
-                                                    ? 'bg-transparent border border-gray-300 text-transparent'
-                                                    : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'
-                                                } ${!canEdit && 'opacity-50 cursor-not-allowed'} ${isCompleted && 'bg-[#34A853] !border-none text-white'}`}
-                                              >
-                                                <Check size={18} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
-                                              </button>
-                                            )}
+                                            <button
+                                              onClick={() => {
+                                                if (!canEdit) return;
+                                                setMessage({ type: 'success', text: 'تم حفظ التعديلات' });
+                                              }}
+                                              disabled={!canEdit}
+                                              className="text-xs font-bold border border-gray-300 text-gray-600 bg-white px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                            >
+                                              حفظ
+                                            </button>
+                                            <button
+                                              onClick={() => {
+                                                if (!canEdit) return;
+                                                const newCompleted = isCompleted
+                                                  ? completedReqs.filter(r => r !== req)
+                                                  : [...completedReqs, req];
+                                                handleUpdateScoutBadge(scout, badgeKey, {
+                                                  completedRequirements: newCompleted
+                                                });
+                                              }}
+                                              disabled={!canEdit}
+                                              className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                                                isCompleted
+                                                  ? 'bg-[#34A853] text-white shadow-sm'
+                                                  : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'
+                                              } ${!canEdit && 'opacity-50 cursor-not-allowed'}`}
+                                            >
+                                              <Check size={18} className={isCompleted ? 'opacity-100' : 'opacity-0'} />
+                                            </button>
                                           </>
                                         )}
                                       </div>
