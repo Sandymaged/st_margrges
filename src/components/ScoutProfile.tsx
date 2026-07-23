@@ -312,17 +312,14 @@ export default function ScoutProfileView({ profile }: ScoutProfileViewProps) {
         const maxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[req] || 0;
         if (maxScore > 0) {
           catMaxScore += maxScore;
-          const score = requirementScores[req] || 0;
-          if (score >= maxScore * 0.5) {
-            catTotalScore += score;
-          }
+          catTotalScore += requirementScores[req] || 0;
         } else {
           catMaxScore += 1;
           catTotalScore += completedReqs.includes(req) ? 1 : 0;
         }
       });
 
-      if (catTotalScore < catMaxScore * 0.5) return false;
+      if (catMaxScore > 0 && (catTotalScore / catMaxScore) * 100 < 60) return false;
     }
 
     return true;

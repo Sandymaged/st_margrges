@@ -1864,10 +1864,7 @@ enum OperationType {
       const maxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[req] || 0;
       if (maxScore > 0) {
         totalMaxScore += maxScore;
-        const score = requirementScores[req] || 0;
-        if (score >= maxScore * 0.5) {
-          totalScore += score;
-        }
+        totalScore += requirementScores[req] || 0;
       } else {
         totalMaxScore += 1;
         totalScore += completedReqs.includes(req) ? 1 : 0;
@@ -1902,10 +1899,7 @@ enum OperationType {
         const maxScore = badgeSettings.requirementMaxScores?.[badgeName]?.[req] || 0;
         if (maxScore > 0) {
           catMaxScore += maxScore;
-          const score = requirementScores[req] || 0;
-          if (score >= maxScore * 0.5) {
-            catTotalScore += score;
-          }
+          catTotalScore += requirementScores[req] || 0;
         } else {
           catMaxScore += 1;
           catTotalScore += completedReqs.includes(req) ? 1 : 0;
