@@ -195,6 +195,11 @@ export default function AdminDashboard({ currentProfile }: AdminDashboardProps) 
     baselineScores: Record<string, number>;
     baselineNotes: string;
     merged: Partial<BadgeProgress>;
+    // When each requirement's score was actually changed on this device (epoch ms),
+    // captured at edit time in handleUpdateScoutBadge - not at flush/send time. Lets
+    // the server tell a genuinely newer edit apart from one that just happened to
+    // reach it first (see set_requirement_score, migration 0009).
+    scoreTimestamps: Record<string, number>;
   }
   const PENDING_BADGE_STORAGE_KEY = 'pending_badge_grading_updates';
   const pendingBadgeUpdatesRef = useRef<Record<string, PendingBadgeEntry>>({});
@@ -1311,7 +1316,7 @@ enum OperationType {
     const pending = pendingBadgeUpdatesRef.current[key];
     if (!pending) return;
 
-    const { scoutUid, scoutStage, badgeKey, badgeName, baselineCompleted, baselineScores, baselineNotes, merged } = pending;
+    const { scoutUid, scoutStage, badgeKey, badgeName, baselineCompleted, baselineScores, baselineNotes, merged, scoreTimestamps } = pending;
 
     try {
       const ops: Promise<{ error: any }>[] = [];
@@ -1319,11 +1324,13 @@ enum OperationType {
       // Scores: send only the specific requirement keys whose value actually changed
       // vs the baseline, via the atomic per-requirement RPC. This is what makes it
       // safe for two admins (or one admin across an offline gap) to grade different
-      // requirements of the same badge without one overwriting the other.
+      // requirements of the same badge without one overwriting the other. Each write
+      // also carries the real edit time so the server can tell a genuinely newer edit
+      // apart from one that just happened to arrive first (see migration 0009).
       if (merged.requirementScores !== undefined) {
         Object.entries(merged.requirementScores).forEach(([reqText, score]) => {
           if (score !== baselineScores[reqText]) {
-            ops.push(rpc('set_requirement_score', { p_user_id: scoutUid, p_slot: badgeKey, p_requirement: reqText, p_score: score }));
+            ops.push(rpc('set_requirement_score', { p_user_id: scoutUid, p_slot: badgeKey, p_requirement: reqText, p_score: score, p_client_time: scoreTimestamps?.[reqText] ?? Date.now() }));
           }
         });
       }
@@ -1418,9 +1425,24 @@ enum OperationType {
       completedRequirements: updates.completedRequirements !== undefined ? updates.completedRequirements : existingMerged.completedRequirements,
     };
 
+    // Stamp "now" for any requirement score that actually changed value vs whatever
+    // was known before (either an earlier not-yet-synced edit, or the last confirmed
+    // save) - this is what set_requirement_score compares against to reject a
+    // late-arriving but actually-older edit. Capturing it here (not at flush time)
+    // means the timestamp reflects when the admin genuinely made the change.
+    const scoreTimestamps: Record<string, number> = { ...(existing?.scoreTimestamps || {}) };
+    if (updates.requirementScores !== undefined) {
+      Object.entries(updates.requirementScores).forEach(([reqText, val]) => {
+        const priorVal = existingMerged.requirementScores?.[reqText] ?? currentBadge.requirementScores?.[reqText];
+        if (val !== priorVal) {
+          scoreTimestamps[reqText] = Date.now();
+        }
+      });
+    }
+
     // Only capture the baseline once, the first time this key gets a pending edit -
     // it has to represent the last confirmed-saved state, not shift on every keystroke.
-    pendingBadgeUpdatesRef.current[key] = existing ? { ...existing, merged } : {
+    pendingBadgeUpdatesRef.current[key] = existing ? { ...existing, merged, scoreTimestamps } : {
       scoutUid: scout.uid,
       scoutStage: scout.stage,
       badgeKey,
@@ -1429,6 +1451,7 @@ enum OperationType {
       baselineScores: currentBadge.requirementScores || {},
       baselineNotes: currentBadge.notes,
       merged,
+      scoreTimestamps,
     };
     persistPendingBadgeUpdates();
     setOptimisticBadgeUpdates(prev => ({ ...prev, [key]: merged }));
